@@ -16,33 +16,7 @@
    - TopicService.create() maps to a POST /api/topics call
    ═══════════════════════════════════════════════ */
 
-/* ── Stub topic service (replace with real API later) ── */
-const TopicService = (() => {
-  const KEY = 'expose_topics_v1';
-  function getAll() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
-  }
-  function save(topics) { localStorage.setItem(KEY, JSON.stringify(topics)); }
-  return {
-    async create(topicData) {
-      await new Promise(r => setTimeout(r, 700)); // simulate latency
-      const all = getAll();
-      const topic = {
-        id: 't_' + Date.now(),
-        name: topicData.name,
-        sources: topicData.sources,
-        allSourcesEnabled: topicData.allSourcesEnabled,
-        createdAt: new Date().toISOString(),
-        subtopics: [],
-        heatScore: 0,
-      };
-      all.unshift(topic);
-      save(all);
-      return { success: true, topic };
-    },
-    getAll,
-  };
-})();
+/* TopicService is loaded from topic.service.js before this file — no stub needed */
 
 /* ── Suggestions for step 1 ── */
 const SUGGESTIONS = [
