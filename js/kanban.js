@@ -20,70 +20,7 @@
    - openFullscreen()    → <FullscreenOverlay />
    ═══════════════════════════════════════════════ */
 
-/* ── Gemini stub (replace with gemini.service.js) ── */
-const GeminiService = {
-  async fetchSubtopics(topic, apiKey) {
-    // → In production: calls gemini.service.js which calls
-    //   POST https://generativelanguage.googleapis.com/v1beta/...
-    //   Returns structured subtopic data from source inflow.
-    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
-
-    // Demo data — realistic structure Gemini will return
-    const demos = {
-      default: [
-        {
-          id: 's_' + Math.random().toString(36).slice(2),
-          name: 'Diplomatic negotiations stall amid new conditions',
-          summary: 'Multiple sources report that talks have broken down following new demands introduced by both parties, with mediators expressing concern over the timeline.',
-          score: 82,
-          sourceCount: 14,
-          sources: {
-            x:      [{ title: 'Breaking: talks collapse after new terms introduced', source: '@BBCBreaking', url: '' }],
-            reddit: [{ title: 'Megathread: latest developments and analysis', source: 'r/worldnews', url: '' }],
-            web:    [{ title: 'Ceasefire negotiations falter as deadline passes', source: 'reuters.com', url: 'https://reuters.com' }, { title: 'UN envoy warns of "critical juncture"', source: 'bbc.co.uk', url: 'https://bbc.co.uk' }],
-          },
-          broadSources: [{ title: 'Historical context: why these talks are different', source: 'foreignpolicy.com', url: '' }, { title: 'Regional powers weigh in on stalled process', source: 'aljazeera.com', url: '' }],
-        },
-        {
-          id: 's_' + Math.random().toString(36).slice(2),
-          name: 'Humanitarian corridor agreement reached',
-          summary: 'A limited agreement on humanitarian access was signed, though aid organizations warn that conditions on the ground remain dire and access is still restricted.',
-          score: 61,
-          sourceCount: 8,
-          sources: {
-            x:      [{ title: 'Aid convoy crosses checkpoint for first time in weeks', source: '@Reuters', url: '' }],
-            reddit: [],
-            web:    [{ title: 'Partial humanitarian deal offers thin relief', source: 'theguardian.com', url: 'https://theguardian.com' }],
-          },
-          broadSources: [],
-        },
-        {
-          id: 's_' + Math.random().toString(36).slice(2),
-          name: 'International pressure mounts on key stakeholders',
-          summary: 'European and Arab nations have issued joint statements calling for immediate action, while the US administration signals a possible shift in its diplomatic approach.',
-          score: 44,
-          sourceCount: 5,
-          sources: {
-            x:      [],
-            reddit: [{ title: 'EU statement analysis — what does this actually change?', source: 'r/geopolitics', url: '' }],
-            web:    [{ title: 'Washington recalibrates its position', source: 'politico.com', url: 'https://politico.com' }],
-          },
-          broadSources: [{ title: 'G7 communiqué calls for immediate humanitarian pause', source: 'reuters.com', url: '' }],
-        },
-      ]
-    };
-
-    // Log to search log
-    await TopicService.appendLog({
-      query:        `${topic.name} — subtopic analysis`,
-      topicId:      topic.id,
-      topicName:    topic.name,
-      resultsCount: demos.default.length,
-    });
-
-    return { success: true, subtopics: demos.default };
-  }
-};
+/* GeminiService is loaded from gemini.service.js — no stub needed */
 
 /* ── State ── */
 const Kanban = (() => {
@@ -117,8 +54,7 @@ const Kanban = (() => {
     topic.status = 'fetching';
     updateColFetchingState(topicId, true);
 
-    const apiKey = getApiKey();
-    const result = await GeminiService.fetchSubtopics(topic, apiKey);
+    const result = await GeminiService.fetchSubtopics(topic);
 
     if (result.success) {
       const updated = await TopicService.setSubtopics(topicId, result.subtopics);
@@ -134,13 +70,6 @@ const Kanban = (() => {
     updateColFetchingState(topicId, false);
     renderColumn(topicId);
     renderSearchLog();
-  }
-
-  function getApiKey() {
-    try {
-      const settings = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
-      return settings.geminiApiKey || '';
-    } catch { return ''; }
   }
 
   /* ── Full board render ── */

@@ -1,0 +1,324 @@
+/* ═══════════════════════════════════════════════
+   EXPOSÉ — gemini.service.js
+
+   Handles all Gemini API calls with Google Search
+   grounding. Two-pass approach:
+     Pass 1 — fetch raw source data via search grounding
+     Pass 2 — ask Gemini to read that data and identify
+               subtopics from the actual inflow
+
+   DEPLOYMENT NOTES:
+   ─────────────────
+   1. MODEL: Uses gemini-2.5-flash. Do NOT use
+      gemini-2.0-flash — it has a known grounding
+      bug as of April 2026 and shuts down June 2026.
+
+   2. API KEY: The key is read from localStorage key
+      'expose_settings_v1' → geminiApiKey. It is sent
+      directly from the browser to Google's API. This
+      is fine for personal/single-user use. For a
+      multi-user production app, move this server-side
+      so the key is never exposed to the client.
+
+   3. CORS: Google's Gemini API allows browser-based
+      (client-side) fetch calls directly. No proxy
+      needed for personal use on GitHub Pages.
+
+   4. HTTPS: GitHub Pages serves HTTPS by default.
+      Gemini API blocks requests from non-HTTPS
+      origins. Do not test from file:// — always
+      use a local server (python3 -m http.server)
+      or your live GitHub Pages URL.
+
+   5. RATE LIMITS (free tier):
+      - 15 requests per minute (RPM)
+      - 1,000,000 tokens per day
+      - 500 search-grounded requests per day
+      With hourly refresh + multiple topics, you can
+      easily hit 500/day. Monitor usage at:
+      https://aistudio.google.com
+
+   6. MIGRATION: To move the API key server-side,
+      replace the fetch() call in _callGemini() with
+      a call to your own proxy endpoint:
+        fetch('/api/gemini', { method:'POST', body:... })
+      Your proxy then calls Gemini with the server-
+      stored key and returns the result. No other
+      code changes needed.
+
+   7. JSON PARSING: Gemini sometimes wraps JSON in
+      markdown fences (```json ... ```). The
+      _extractJSON() helper strips these safely.
+
+   8. SEARCH GROUNDING DISPLAY REQUIREMENT: Google's
+      terms require that if a response includes
+      searchEntryPoint.renderedContent in the
+      groundingMetadata, you display it to the user.
+      We store it on each subtopic and kanban.js
+      renders it in the full-screen overlay.
+   ═══════════════════════════════════════════════ */
+
+const GeminiService = (() => {
+
+  const MODEL   = 'gemini-2.5-flash';
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+  /* ── Get API key from settings ── */
+  function getApiKey() {
+    try {
+      const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+      return s.geminiApiKey || '';
+    } catch { return ''; }
+  }
+
+  /* ── Core API call ── */
+  async function _callGemini(prompt, useSearch = true) {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('NO_API_KEY');
+
+    const body = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature:    1.0,  // recommended for grounding per Google docs
+        maxOutputTokens: 2048,
+      },
+    };
+
+    if (useSearch) {
+      body.tools = [{ google_search: {} }];
+    }
+
+    const res = await fetch(`${API_URL}?key=${apiKey}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = err?.error?.message || `HTTP ${res.status}`;
+      // Surface quota errors clearly
+      if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
+      if (res.status === 400) throw new Error(`BAD_REQUEST: ${msg}`);
+      if (res.status === 403) throw new Error('INVALID_API_KEY');
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+    const candidate = data.candidates?.[0];
+    if (!candidate) throw new Error('No response from Gemini');
+
+    const text     = candidate.content?.parts?.map(p => p.text || '').join('') || '';
+    const grounding = candidate.groundingMetadata || {};
+
+    return { text, grounding, candidate };
+  }
+
+  /* ── Strip markdown fences and parse JSON ── */
+  function _extractJSON(text) {
+    // Try fenced block first
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) {
+      try { return JSON.parse(fenced[1].trim()); } catch {}
+    }
+    // Try raw JSON object
+    const raw = text.match(/(\{[\s\S]*\})/);
+    if (raw) {
+      try { return JSON.parse(raw[1]); } catch {}
+    }
+    // Try whole string
+    try { return JSON.parse(text.trim()); } catch {}
+    return null;
+  }
+
+  /* ── Build source-scoped search query ── */
+  function _buildSearchQuery(topicName, sources, expandTopics) {
+    const parts = [topicName];
+
+    // Add site: operators for web sources
+    if (sources.web?.length) {
+      const sites = sources.web.slice(0, 3).map(s => `site:${s}`).join(' OR ');
+      parts.push(`(${sites})`);
+    }
+
+    // Add Reddit scope
+    if (sources.reddit?.length) {
+      const subs = sources.reddit.slice(0, 3).map(s => `site:reddit.com ${s}`).join(' OR ');
+      parts.push(`(${subs})`);
+    }
+
+    // Add X scope (Google-indexed tweets)
+    if (sources.x?.length) {
+      const xTerms = sources.x.slice(0, 3).map(s =>
+        s.startsWith('@') ? `site:x.com ${s.slice(1)}` : `site:x.com "${s}"`
+      ).join(' OR ');
+      parts.push(`(${xTerms})`);
+    }
+
+    // If expandTopics is on, tell Gemini to broaden
+    const expand = expandTopics !== false;
+    const expandNote = expand
+      ? 'Also search for related angles, synonyms, and emerging subtopics.'
+      : 'Search only for the exact topic as stated.';
+
+    return { query: parts.join(' '), expandNote };
+  }
+
+  /* ════════════════════════════════
+     MAIN EXPORT: fetchSubtopics
+     Called by kanban.js for each topic refresh.
+  ════════════════════════════════ */
+  async function fetchSubtopics(topic) {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error:   'NO_API_KEY',
+        message: 'Add your Gemini API key in Settings to enable live data.',
+      };
+    }
+
+    const settings    = (() => { try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; } })();
+    const expandTopics = settings.expandTopics !== false;
+    const { query, expandNote } = _buildSearchQuery(topic.name, topic.sources, expandTopics);
+
+    /* ── PASS 1: Search grounding — fetch real source data ── */
+    const pass1Prompt = `
+You are an OSINT analyst. Search the web right now for recent news and content about: "${topic.name}"
+
+Search scope: ${query}
+${expandNote}
+
+Find 8-15 recent articles, posts, or sources published in the last 72 hours if possible.
+Read the content carefully. Do not summarize yet — just collect what you find.
+List what each source is saying about "${topic.name}".
+`.trim();
+
+    let pass1Result;
+    try {
+      pass1Result = await _callGemini(pass1Prompt, true);
+    } catch (err) {
+      return { success: false, error: err.message, message: _friendlyError(err.message) };
+    }
+
+    // Short circuit if grounding returned nothing useful
+    if (!pass1Result.text || pass1Result.text.length < 100) {
+      return {
+        success: false,
+        error:   'EMPTY_RESPONSE',
+        message: 'Gemini returned no results. Try again or check your API key quota.',
+      };
+    }
+
+    /* ── PASS 2: Subtopic extraction — read inflow, identify subtopics ── */
+    const pass2Prompt = `
+You are an OSINT analyst. Below is raw source data collected about the topic "${topic.name}".
+Read it carefully and identify 2-5 distinct SUBTOPICS that are actually emerging from this data.
+
+IMPORTANT RULES:
+- Subtopics must come FROM the data, not invented by you
+- Each subtopic must be a real angle or development found in the sources
+- Do not generate subtopics and then search for them — only surface what is in the data below
+
+RAW SOURCE DATA:
+${pass1Result.text}
+
+Return ONLY a valid JSON object. No markdown, no explanation, no text outside the JSON.
+Use this exact structure:
+
+{
+  "subtopics": [
+    {
+      "id": "unique_short_id",
+      "name": "Short subtopic title (max 8 words)",
+      "summary": "1-2 sentences describing what sources are actually saying about this subtopic.",
+      "score": <integer 0-100 based on how many sources cover it and how significant>,
+      "sourceCount": <integer, number of distinct sources mentioning this subtopic>,
+      "sources": {
+        "x":      [{ "title": "post or headline", "source": "@handle or X", "url": "" }],
+        "reddit": [{ "title": "thread title", "source": "r/subreddit", "url": "" }],
+        "web":    [{ "title": "article headline", "source": "domain.com", "url": "full url if available" }]
+      },
+      "broadSources": []
+    }
+  ],
+  "searchQueries": ["list", "of", "queries", "used"]
+}
+`.trim();
+
+    let pass2Result;
+    try {
+      pass2Result = await _callGemini(pass2Prompt, false); // no search on pass 2
+    } catch (err) {
+      return { success: false, error: err.message, message: _friendlyError(err.message) };
+    }
+
+    const parsed = _extractJSON(pass2Result.text);
+    if (!parsed?.subtopics?.length) {
+      return {
+        success: false,
+        error:   'PARSE_ERROR',
+        message: 'Could not parse subtopics from Gemini response. Try again.',
+      };
+    }
+
+    /* ── If allSourcesEnabled, run a broad search too ── */
+    let broadResults = [];
+    if (topic.allSourcesEnabled) {
+      try {
+        const broadPrompt = `
+Search the open web for the latest news about: "${topic.name}"
+Find 4-6 sources from any website. Return a JSON array of objects:
+[{ "title": "headline", "source": "domain.com", "url": "url if available" }]
+Return ONLY the JSON array, no other text.
+`.trim();
+        const broadResult = await _callGemini(broadPrompt, true);
+        const broadParsed = _extractJSON(broadResult.text);
+        if (Array.isArray(broadParsed)) broadResults = broadParsed;
+      } catch { /* broad search failure is non-fatal */ }
+    }
+
+    // Attach broad results to the first subtopic (highest score)
+    const sorted = [...parsed.subtopics].sort((a, b) => (b.score || 0) - (a.score || 0));
+    if (broadResults.length && sorted[0]) {
+      sorted[0].broadSources = broadResults;
+    }
+
+    // Pull Google Search suggestion HTML if present (display requirement)
+    const searchSuggestionHTML = pass1Result.grounding?.searchEntryPoint?.renderedContent || null;
+
+    // Log to search log
+    const queries = parsed.searchQueries || [topic.name];
+    for (const q of queries) {
+      await TopicService.appendLog({
+        query:        q,
+        topicId:      topic.id,
+        topicName:    topic.name,
+        resultsCount: sorted.length,
+      });
+    }
+
+    return {
+      success:             true,
+      subtopics:           sorted,
+      searchSuggestionHTML, // store on topic for display in full-screen overlay
+      groundingChunks:     pass1Result.grounding?.groundingChunks || [],
+    };
+  }
+
+  /* ── Human-readable error messages ── */
+  function _friendlyError(code) {
+    const map = {
+      NO_API_KEY:     'Add your Gemini API key in Settings → Intelligence.',
+      QUOTA_EXCEEDED: 'Daily API quota reached. Wait until tomorrow or check your usage at aistudio.google.com.',
+      INVALID_API_KEY:'API key rejected. Check it is correct in Settings → Intelligence.',
+      EMPTY_RESPONSE: 'Gemini returned empty results. This is a known intermittent issue — try again.',
+      PARSE_ERROR:    'Could not parse Gemini response. Try refreshing the topic.',
+    };
+    return map[code] || `Gemini error: ${code}`;
+  }
+
+  return { fetchSubtopics, getApiKey };
+})();
+
+window.GeminiService = GeminiService;
