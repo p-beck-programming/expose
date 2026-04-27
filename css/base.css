@@ -1,0 +1,65 @@
+/* ═══════════════════════════════════════════════
+   EXPOSÉ — base.css
+   Reset, body defaults, shared keyframes.
+   Import after variables.css.
+   ═══════════════════════════════════════════════ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.55;
+  transition: background var(--t-base), color var(--t-base);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+img, svg {
+  display: block;
+}
+
+/* ── Dot-grid page background ── */
+.dot-bg::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Keyframes ── */
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes pulse    { 0%,100%{ opacity:1 } 50%{ opacity:0.4 } }
+@keyframes fadeUp   { from{ opacity:0; transform:translateY(12px) } to{ opacity:1; transform:none } }
+@keyframes scaleIn  { from{ opacity:0; transform:scale(0.97) translateY(8px) } to{ opacity:1; transform:none } }
+@keyframes shimmer  { 0%{ background-position:200% 0 } 100%{ background-position:-200% 0 } }
+@keyframes badgePop { from{ transform:scale(0) } to{ transform:scale(1) } }
+@keyframes tagIn    { from{ opacity:0; transform:scale(0.92) } to{ opacity:1; transform:scale(1) } }
+@keyframes slideUp  { from{ opacity:0; transform:translateY(8px) } to{ opacity:1; transform:none } }

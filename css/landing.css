@@ -1,0 +1,137 @@
+/* ═══════════════════════════════════════════════
+   EXPOSÉ — landing.css
+   Marketing / hero page styles.
+   ═══════════════════════════════════════════════ */
+
+.landing-page {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.landing-content {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 1080px;
+  padding: 0 40px;
+}
+
+/* ── Hero ── */
+.hero {
+  padding-top: 128px;
+  padding-bottom: 80px;
+  text-align: center;
+}
+
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 5px 14px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-muted); letter-spacing: 0.08em;
+  margin-bottom: 28px;
+  box-shadow: var(--shadow-sm);
+  animation: fadeUp 0.5s ease both;
+}
+.eyebrow-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 2s infinite;
+}
+
+.hero-headline {
+  font-family: var(--font-ui);
+  font-size: clamp(38px, 5.5vw, 66px);
+  font-weight: 800;
+  line-height: 1.06;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  margin-bottom: 22px;
+  animation: fadeUp 0.5s ease 0.08s both;
+}
+.headline-accent { color: var(--accent); }
+
+.hero-sub {
+  font-size: 17px; font-weight: 400;
+  color: var(--ink-muted);
+  max-width: 500px; margin: 0 auto 38px;
+  line-height: 1.65;
+  animation: fadeUp 0.5s ease 0.16s both;
+}
+
+.hero-actions {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; flex-wrap: wrap;
+  animation: fadeUp 0.5s ease 0.24s both;
+}
+
+/* ── Features ── */
+.features {
+  padding-bottom: 80px;
+  animation: fadeUp 0.5s ease 0.32s both;
+}
+.features-eyebrow {
+  font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  text-align: center; margin-bottom: 28px;
+}
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 28px 26px;
+  box-shadow: var(--shadow-sm);
+  position: relative; overflow: hidden;
+  transition: transform var(--t-base), box-shadow var(--t-base);
+}
+.feature-card::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--accent); opacity: 0;
+  transition: opacity var(--t-base);
+}
+.feature-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.feature-card:hover::after { opacity: 1; }
+
+.feature-icon {
+  width: 44px; height: 44px;
+  background: var(--accent-soft);
+  border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px; color: var(--accent-text);
+}
+.feature-icon svg { width: 21px; height: 21px; }
+.feature-title {
+  font-family: var(--font-ui); font-size: 15px; font-weight: 700;
+  color: var(--ink); margin-bottom: 10px;
+}
+.feature-desc { font-size: 13px; color: var(--ink-muted); line-height: 1.65; }
+
+/* ── Proof strip ── */
+.proof-strip {
+  border-top: 1px solid var(--border-soft);
+  padding: 28px 0 72px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 40px; flex-wrap: wrap;
+  animation: fadeUp 0.5s ease 0.4s both;
+}
+.proof-item {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted);
+  letter-spacing: 0.04em;
+}
+.proof-item svg { width: 13px; height: 13px; color: var(--ink-muted); flex-shrink: 0; }
+
+@media (max-width: 768px) {
+  .features-grid { grid-template-columns: 1fr; }
+  .landing-content { padding: 0 20px; }
+  .topnav { padding: 0 20px; }
+}

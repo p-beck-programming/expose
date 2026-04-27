@@ -1,0 +1,81 @@
+/* ═══════════════════════════════════════════════
+   EXPOSÉ — variables.css
+   Single source of truth for all design tokens.
+   Import first in every HTML page.
+   ═══════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Palette — light mode */
+  --bg:           #EDEAE2;
+  --surface:      #F8F6F1;
+  --surface2:     #F0EDE5;
+  --surface3:     #E5E1D7;
+  --ink:          #0F1117;
+  --ink-2:        #363B45;
+  --ink-muted:    #8A8F9A;
+  --accent:       #1A4FD6;
+  --accent-soft:  #EBF0FD;
+  --accent-text:  #1340B8;
+  --accent-hover: #1644C2;
+  --border:       #DDD8CD;
+  --border-soft:  #E8E4DA;
+  --danger:       #C0392B;
+  --danger-soft:  #FDECEA;
+  --warn:         #B45309;
+  --warn-soft:    #FEF3E2;
+  --success:      #1A7A4A;
+  --success-soft: #E6F5ED;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg:  0 12px 40px rgba(0,0,0,0.10), 0 4px 12px rgba(0,0,0,0.06);
+
+  /* Typography */
+  --font-ui:    'Syne', sans-serif;
+  --font-body:  'Manrope', sans-serif;
+  --font-mono:  'DM Mono', monospace;
+
+  /* Layout */
+  --sidebar-w:  232px;
+  --topbar-h:   58px;
+
+  /* Radii */
+  --r-sm:   8px;
+  --r-md:   12px;
+  --r-lg:   16px;
+  --r-xl:   20px;
+  --r-pill: 999px;
+
+  /* Transitions */
+  --t-fast:   0.12s ease;
+  --t-base:   0.20s ease;
+  --t-slow:   0.35s ease;
+}
+
+[data-theme="dark"] {
+  --bg:           #0C0E12;
+  --surface:      #12151B;
+  --surface2:     #181C24;
+  --surface3:     #1E222C;
+  --ink:          #E8E4D8;
+  --ink-2:        #A8A49A;
+  --ink-muted:    #565C6A;
+  --accent:       #4B7BF5;
+  --accent-soft:  #0D1830;
+  --accent-text:  #7BA3FF;
+  --accent-hover: #3D6EE8;
+  --border:       #222730;
+  --border-soft:  #1A1E26;
+  --danger:       #F87171;
+  --danger-soft:  #220C0C;
+  --warn:         #F59E0B;
+  --warn-soft:    #221608;
+  --success:      #34D374;
+  --success-soft: #0A2018;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.40);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.50);
+  --shadow-lg:    0 12px 40px rgba(0,0,0,0.60);
+}

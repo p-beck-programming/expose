@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Exposé — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ════════════════════════════════════════════════
+   variables.css — will be extracted to its own file
+   ════════════════════════════════════════════════ */
+:root {
+  --bg:           #EDEAE2;
+  --surface:      #F8F6F1;
+  --surface2:     #F0EDE5;
+  --surface3:     #E5E1D7;
+  --ink:          #0F1117;
+  --ink-2:        #363B45;
+  --ink-muted:    #8A8F9A;
+  --accent:       #1A4FD6;
+  --accent-soft:  #EBF0FD;
+  --accent-text:  #1340B8;
+  --border:       #DDD8CD;
+  --border-soft:  #E8E4DA;
+  --danger:       #C0392B;
+  --danger-soft:  #FDECEA;
+  --warn:         #B45309;
+  --success:      #1A7A4A;
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  --font-ui:    'Syne', sans-serif;
+  --font-body:  'Manrope', sans-serif;
+  --font-mono:  'DM Mono', monospace;
+  --sidebar-w:  232px;
+  --topbar-h:   58px;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-pill: 999px;
+}
+[data-theme="dark"] {
+  --bg:           #0C0E12;
+  --surface:      #12151B;
+  --surface2:     #181C24;
+  --surface3:     #1E222C;
+  --ink:          #E8E4D8;
+  --ink-2:        #A8A49A;
+  --ink-muted:    #565C6A;
+  --accent:       #4B7BF5;
+  --accent-soft:  #0D1830;
+  --accent-text:  #7BA3FF;
+  --border:       #222730;
+  --border-soft:  #1A1E26;
+  --danger:       #F87171;
+  --danger-soft:  #220C0C;
+  --warn:         #F59E0B;
+  --success:      #34D374;
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.5);
+}
+
+/* ════════════════════════════════════════════════
+   base.css
+   ════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: var(--font-body); background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.5; overflow: hidden; transition: background 0.2s, color 0.2s; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+
+/* ════════════════════════════════════════════════
+   nav.css — sidebar + topbar
+   ════════════════════════════════════════════════ */
+.layout { display: flex; height: 100vh; overflow: hidden; }
+
+/* Sidebar */
+.sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; flex-shrink: 0; transition: background 0.2s, border-color 0.2s; }
+.sidebar-brand { padding: 18px 16px 16px; border-bottom: 1px solid var(--border-soft); }
+.brand-row { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 32px; height: 32px; background: var(--ink); border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+.brand-mark svg { width: 17px; height: 17px; }
+.brand-name { font-family: var(--font-ui); font-size: 14px; font-weight: 700; letter-spacing: 0.05em; color: var(--ink); line-height: 1.1; }
+.brand-sub { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.1em; margin-top: 2px; }
+
+.nav-section { padding: 12px 10px 0; }
+.nav-label { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.14em; text-transform: uppercase; padding: 0 8px 6px; }
+.nav-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: var(--r-pill); background: none; border: none; color: var(--ink-2); font-family: var(--font-ui); font-size: 13px; font-weight: 500; cursor: pointer; text-align: left; margin-bottom: 2px; transition: background 0.15s, color 0.15s; }
+.nav-item:hover { background: var(--surface2); color: var(--ink); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent-text); }
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.65; }
+.nav-item.active svg { opacity: 1; }
+
+/* Search log */
+.search-log { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 10px; margin-top: 10px; }
+.log-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px; }
+.log-title { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.14em; text-transform: uppercase; }
+.log-list { flex: 1; overflow-y: auto; }
+.log-list::-webkit-scrollbar { width: 3px; }
+.log-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.log-empty { padding: 20px 8px; text-align: center; }
+.log-empty-ring { width: 36px; height: 36px; border: 1.5px dashed var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; color: var(--ink-muted); }
+.log-empty-ring svg { width: 14px; height: 14px; }
+.log-empty-text { font-size: 11px; color: var(--ink-muted); line-height: 1.6; }
+.log-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: var(--r-sm); cursor: pointer; margin-bottom: 1px; transition: background 0.15s; }
+.log-item:hover { background: var(--surface2); }
+.log-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+.log-content { flex: 1; min-width: 0; }
+.log-query { font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.log-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); margin-top: 1px; }
+
+/* Sidebar footer */
+.sidebar-footer { padding: 12px 14px; border-top: 1px solid var(--border-soft); display: flex; align-items: center; gap: 8px; }
+.user-pill { flex: 1; display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; background: var(--surface2); border: 1px solid var(--border-soft); border-radius: var(--r-pill); cursor: pointer; min-width: 0; transition: border-color 0.15s; }
+.user-pill:hover { border-color: var(--border); }
+.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--ink); display: flex; align-items: center; justify-content: center; font-family: var(--font-ui); font-size: 10px; font-weight: 700; color: var(--surface); flex-shrink: 0; transition: background 0.2s; }
+.user-email { font-family: var(--font-ui); font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-btn { width: 32px; height: 32px; border-radius: var(--r-pill); background: var(--surface2); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); flex-shrink: 0; transition: all 0.15s; }
+.theme-btn:hover { border-color: var(--border); color: var(--ink); }
+.theme-btn svg { width: 14px; height: 14px; }
+.icon-sun { display: block; }
+.icon-moon { display: none; }
+[data-theme="dark"] .icon-sun { display: none; }
+[data-theme="dark"] .icon-moon { display: block; }
+
+/* Topbar */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.topbar { height: var(--topbar-h); background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 0 20px; flex-shrink: 0; transition: background 0.2s, border-color 0.2s; }
+.add-topic-btn { display: flex; align-items: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: var(--r-pill); padding: 9px 18px; font-family: var(--font-ui); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.02em; box-shadow: 0 2px 10px rgba(26,79,214,0.28); transition: opacity 0.15s, transform 0.1s; }
+.add-topic-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.add-topic-btn svg { width: 12px; height: 12px; }
+.search-wrap { flex: 1; position: relative; max-width: 460px; }
+.search-ico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
+.search-ico svg { width: 13px; height: 13px; display: block; }
+.search-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 8px 16px 8px 36px; font-family: var(--font-body); font-size: 12px; color: var(--ink); outline: none; transition: border-color 0.15s, background 0.15s; }
+.search-input::placeholder { color: var(--ink-muted); }
+.search-input:focus { border-color: var(--accent); background: var(--surface); }
+.topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.icon-btn { width: 32px; height: 32px; border-radius: var(--r-pill); background: var(--surface2); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); transition: all 0.15s; }
+.icon-btn:hover { border-color: var(--border); color: var(--ink); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+/* Content area */
+.content { flex: 1; overflow: hidden; padding: 20px; display: flex; flex-direction: column; }
+
+/* Empty state */
+.empty-zone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; animation: fadeUp 0.35s ease both; }
+.empty-icon-wrap { width: 68px; height: 68px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
+.empty-icon-wrap svg { width: 28px; height: 28px; color: var(--ink-muted); }
+.empty-title { font-family: var(--font-ui); font-size: 18px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.empty-sub { font-size: 13px; color: var(--ink-muted); max-width: 290px; line-height: 1.65; margin-bottom: 26px; }
+.empty-cta { display: inline-flex; align-items: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: var(--r-pill); padding: 11px 24px; font-family: var(--font-ui); font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 0.02em; box-shadow: 0 2px 14px rgba(26,79,214,0.3); transition: opacity 0.15s, transform 0.1s; }
+.empty-cta:hover { opacity: 0.9; transform: translateY(-1px); }
+.empty-cta svg { width: 13px; height: 13px; }
+.tip-row { margin-top: 18px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-muted); }
+.tip-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 3px 9px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); }
+</style>
+
+<!-- Kanban + overlay styles -->
+<link rel="stylesheet" href="css/kanban.css"/>
+<link rel="stylesheet" href="css/overlay.css"/>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-row">
+        <div class="brand-mark">
+          <svg viewBox="0 0 17 17" fill="none" stroke="#F8F6F1" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="8.5" cy="8.5" r="6.5"/>
+            <circle cx="8.5" cy="8.5" r="2.5"/>
+            <line x1="8.5" y1="2"  x2="8.5" y2="6"/>
+            <line x1="8.5" y1="11" x2="8.5" y2="15"/>
+            <line x1="2"   y1="8.5" x2="6"   y2="8.5"/>
+            <line x1="11"  y1="8.5" x2="15"  y2="8.5"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-name">EXPOSÉ</div>
+          <div class="brand-sub">OSINT MONITOR</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Navigation</div>
+      <button class="nav-item active">
+        <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="1" y="1" width="5.5" height="5.5" rx="1.2"/><rect x="8.5" y="1" width="5.5" height="5.5" rx="1.2"/>
+          <rect x="1" y="8.5" width="5.5" height="5.5" rx="1.2"/><rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2"/>
+        </svg>
+        Dashboard
+      </button>
+      <button class="nav-item" onclick="window.location.href='settings.html'">
+        <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7.5" cy="7.5" r="2"/>
+          <path d="M7.5 1.5v1.8M7.5 11.7v1.8M13.5 7.5h-1.8M3.3 7.5H1.5M11.7 3.3l-1.3 1.3M4.6 10.1l-1.3 1.3M11.7 11.7l-1.3-1.3M4.6 4.9L3.3 3.6"/>
+        </svg>
+        Settings
+      </button>
+      <button class="nav-item" onclick="window.location.href='settings.html'">
+        <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7.5" cy="5" r="2.8"/><path d="M1.5 13.5c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+        </svg>
+        Profile
+      </button>
+    </div>
+
+    <!-- Search Log -->
+    <div class="search-log">
+      <div class="log-header">
+        <span class="log-title">Search Log</span>
+      </div>
+      <div class="log-list" id="log-list">
+        <div class="log-empty">
+          <div class="log-empty-ring">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+              <circle cx="7" cy="7" r="5.5"/><line x1="7" y1="4.5" x2="7" y2="7.5"/>
+              <circle cx="7" cy="9.5" r="0.5" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="log-empty-text">No searches yet.<br/>Add a topic to begin.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="sidebar-footer">
+      <div class="user-pill" onclick="window.location.href='settings.html'" style="cursor:pointer" title="Go to settings">
+        <div class="avatar" id="user-avatar">U</div>
+        <span class="user-email" id="user-email">user@email.com</span>
+      </div>
+      <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="7" cy="7" r="2.5"/>
+          <line x1="7" y1="1" x2="7" y2="2.5"/><line x1="7" y1="11.5" x2="7" y2="13"/>
+          <line x1="1" y1="7" x2="2.5" y2="7"/><line x1="11.5" y1="7" x2="13" y2="7"/>
+          <line x1="3" y1="3" x2="4.1" y2="4.1"/><line x1="9.9" y1="9.9" x2="11" y2="11"/>
+          <line x1="11" y1="3" x2="9.9" y2="4.1"/><line x1="4.1" y1="9.9" x2="3" y2="11"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M12 9.5A6 6 0 0 1 4.5 2a6 6 0 1 0 7.5 7.5z"/>
+        </svg>
+      </button>
+      <button class="theme-btn" onclick="handleLogout()" title="Sign out" style="flex-shrink:0">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h2"/>
+          <polyline points="9,10 12,7 9,4"/>
+          <line x1="12" y1="7" x2="5" y2="7"/>
+        </svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+    <div class="topbar">
+      <button class="add-topic-btn" onclick="Overlay.open()">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
+        </svg>
+        Add Topic
+      </button>
+      <div class="search-wrap">
+        <span class="search-ico">
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="5.5" cy="5.5" r="4"/><line x1="8.8" y1="8.8" x2="12" y2="12"/>
+          </svg>
+        </span>
+        <input class="search-input" type="text" placeholder="Search topics, subtopics, sources…" oninput="handleSearch(this.value)"/>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" title="Refresh all" onclick="refreshAll()">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.5 7a5.5 5.5 0 1 1-5.5-5.5c1.5 0 2.9.6 3.9 1.6"/>
+            <polyline points="11,1.5 11,4 13.5,4"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="kanban-area" id="kanban-area">
+        <!-- Rendered by kanban.js -->
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ════════════════════════════════════════════
+     TOPIC CREATION OVERLAY
+     ════════════════════════════════════════════ -->
+<div class="overlay-backdrop" id="overlay-backdrop" style="display:none" onclick="handleBackdropClick(event)">
+  <div class="overlay-card" onclick="event.stopPropagation()">
+    <div class="overlay-header">
+      <div class="overlay-header-left">
+        <div class="overlay-step-label" id="overlay-step-label">Step 1 of 2</div>
+        <div class="overlay-title"      id="overlay-title">New topic</div>
+        <div class="overlay-sub"        id="overlay-sub">What do you want Exposé to monitor?</div>
+      </div>
+      <button class="overlay-close" onclick="Overlay.close()">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+        </svg>
+      </button>
+    </div>
+    <div class="overlay-progress">
+      <div class="progress-pip active"></div>
+      <div class="progress-pip"></div>
+    </div>
+    <div class="overlay-body">
+
+      <!-- Step 1 -->
+      <div class="overlay-step active" id="step-1">
+        <input class="topic-name-input" id="topic-name-input" type="text" maxlength="60"
+          placeholder="e.g. Gaza ceasefire, TSMC earnings…"
+          oninput="Overlay.updateCharCount(this.value)" autocomplete="off" spellcheck="false"/>
+        <div class="field-error" id="topic-name-error">
+          <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/>
+            <circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+          </svg><span></span>
+        </div>
+        <div class="char-count" id="char-count">0 / 60</div>
+        <div class="topic-suggestions-label">Try a topic</div>
+        <div class="topic-suggestions" id="topic-suggestions"></div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="overlay-step" id="step-2">
+        <!-- X -->
+        <div class="source-section" id="source-section-x">
+          <div class="source-section-header" onclick="Overlay.toggleSection('x')">
+            <div class="source-icon x-icon"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></div>
+            <span class="source-section-name">X (Twitter)</span>
+            <span class="source-section-count" id="x-count"></span>
+            <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-type-toggle">
+              <button class="type-btn active" id="x-mode-topic"   onclick="Overlay.setXMode('topic')">Topic search</button>
+              <button class="type-btn"        id="x-mode-handle"  onclick="Overlay.setXMode('handle')">Specific handle</button>
+            </div>
+            <div class="source-input-row">
+              <span class="source-prefix" id="x-prefix" style="display:none">@</span>
+              <input class="source-input" id="x-source-input" placeholder="e.g. AI regulation, GPT" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('x')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('x')">+ Add</button>
+            </div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Results pulled from Google-indexed X posts</div>
+            <div class="source-tags" id="x-tags"></div>
+          </div>
+        </div>
+
+        <!-- Reddit -->
+        <div class="source-section" id="source-section-reddit">
+          <div class="source-section-header" onclick="Overlay.toggleSection('reddit')">
+            <div class="source-icon reddit-icon"><svg viewBox="0 0 24 24" fill="white"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg></div>
+            <span class="source-section-name">Reddit</span>
+            <span class="source-section-count" id="reddit-count"></span>
+            <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <span class="source-prefix" style="display:flex">r/</span>
+              <input class="source-input has-prefix" id="reddit-input" placeholder="worldnews, technology…" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('reddit')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('reddit')">+ Add</button>
+            </div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Results sourced from Google-indexed Reddit threads</div>
+            <div class="source-tags" id="reddit-tags"></div>
+          </div>
+        </div>
+
+        <!-- Web -->
+        <div class="source-section" id="source-section-web">
+          <div class="source-section-header" onclick="Overlay.toggleSection('web')">
+            <div class="source-icon web-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="3" y1="6" x2="17" y2="6"/><line x1="3" y1="14" x2="17" y2="14"/></svg></div>
+            <span class="source-section-name">Websites</span>
+            <span class="source-section-count" id="web-count"></span>
+            <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <input class="source-input" id="web-input" placeholder="reuters.com, bbc.co.uk…" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('web')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('web')">+ Add</button>
+            </div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Domain only — no https:// needed</div>
+            <div class="source-tags" id="web-tags"></div>
+          </div>
+        </div>
+
+        <!-- All sources toggle -->
+        <div class="all-sources-block" id="all-sources-block" onclick="Overlay.toggleAllSources()">
+          <div class="all-sources-text">
+            <div class="all-sources-title">Broad web search <span class="all-sources-badge">Optional</span></div>
+            <div class="all-sources-desc">Search the open web using AI-generated booster terms. Results shown in a separate expandable panel.</div>
+          </div>
+          <div class="toggle-switch" id="all-sources-toggle"></div>
+        </div>
+        <div class="no-sources-note" id="no-sources-hint" style="display:none">
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="5.5"/><line x1="6.5" y1="4" x2="6.5" y2="7"/><circle cx="6.5" cy="9" r="0.5" fill="currentColor"/></svg>
+          Add at least one source, or enable broad web search above.
+        </div>
+      </div>
+    </div>
+    <div class="overlay-footer">
+      <div class="overlay-footer-left">
+        <div class="step-hint" id="overlay-footer-hint">
+          <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><polyline points="2,5.5 4.5,8 9,3"/></svg>
+          Press Enter to continue
+        </div>
+      </div>
+      <div class="overlay-footer-right">
+        <button class="btn-back" id="overlay-back-btn" style="display:none" onclick="overlayGoBack()">← Back</button>
+        <button class="btn-next" id="overlay-next-btn" onclick="overlayHandleNext()">
+          <div class="spinner"></div>
+          <span class="btn-next-label">Continue</span>
+          <svg class="next-arrow" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="1" y1="6" x2="11" y2="6"/><polyline points="7,2 11,6 7,10"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     FULL-SCREEN SUBTOPIC OVERLAY
+     ════════════════════════════════════════════ -->
+<div class="fullscreen-overlay" id="fullscreen-overlay">
+  <div class="fullscreen-topbar">
+    <button class="fullscreen-back" onclick="Kanban.closeFullscreen()">
+      <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="13" y1="7" x2="1" y2="7"/><polyline points="5,3 1,7 5,11"/>
+      </svg>
+      Back to dashboard
+    </button>
+    <div class="fullscreen-title" id="fullscreen-title"></div>
+    <button class="fullscreen-close" onclick="Kanban.closeFullscreen()">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+      </svg>
+    </button>
+  </div>
+  <div class="fullscreen-body" id="fullscreen-body"></div>
+</div>
+
+<!-- Scripts — order matters, NO defer (inline script depends on these being defined) -->
+<script src="js/auth.service.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/topic.service.js"></script>
+<script src="js/topic-overlay.js"></script>
+<script src="js/kanban.js"></script>
+<script>
+/* ════════════════════════════════════════════════
+   dashboard.js — inline for now, extract later
+   Wires overlay → kanban, loads user, inits board.
+   ════════════════════════════════════════════════ */
+
+/* Overlay glue */
+function overlayHandleNext() {
+  const active = document.querySelector('.overlay-step.active')?.id;
+  if (active === 'step-1') Overlay.goToStep2();
+  else Overlay.submit();
+}
+function overlayGoBack() {
+  document.querySelectorAll('.overlay-step').forEach((el, i) => el.classList.toggle('active', i === 0));
+  document.querySelectorAll('.progress-pip').forEach((pip, i) => {
+    pip.classList.remove('done','active');
+    if (i === 0) pip.classList.add('active');
+  });
+  document.getElementById('overlay-step-label').textContent = 'Step 1 of 2';
+  document.getElementById('overlay-title').textContent = 'New topic';
+  document.getElementById('overlay-sub').textContent = 'What do you want Exposé to monitor?';
+  document.getElementById('overlay-back-btn').style.display = 'none';
+  document.getElementById('overlay-footer-hint').style.display = 'flex';
+  const label = document.querySelector('.btn-next-label');
+  if (label) label.textContent = 'Continue';
+  const arrow = document.querySelector('.next-arrow');
+  if (arrow) arrow.style.display = 'block';
+  setTimeout(() => document.getElementById('topic-name-input')?.focus(), 50);
+}
+function handleBackdropClick(e) {
+  if (e.target === document.getElementById('overlay-backdrop')) Overlay.close();
+}
+
+/* Suggestions */
+function initSuggestions() {
+  const el = document.getElementById('topic-suggestions');
+  if (!el) return;
+  ['AI regulation','Gaza ceasefire','TSMC earnings','Fed interest rates','SpaceX launch','Climate summit'].forEach(s => {
+    const pill = document.createElement('button');
+    pill.className = 'suggestion-pill';
+    pill.textContent = s;
+    pill.onclick = () => Overlay.setSuggestion(s);
+    el.appendChild(pill);
+  });
+}
+
+/* Theme */
+function toggleTheme() { Theme.toggle(); }
+
+/* Search (client-side filter) */
+function handleSearch(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('.subtopic-card').forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+}
+
+/* Refresh all topics */
+async function refreshAll() {
+  const topics = await TopicService.getTopics();
+  topics.forEach(t => Kanban.fetchTopicData(t.id));
+}
+
+/* Load saved user */
+function loadUser() {
+  try {
+    const session = JSON.parse(localStorage.getItem('expose_session_v1'));
+    if (session?.email) {
+      document.getElementById('user-email').textContent = session.email;
+      document.getElementById('user-avatar').textContent = session.email[0].toUpperCase();
+    }
+  } catch {}
+}
+
+/* Boot */
+Theme.init();
+Router.requireAuth();
+loadUser();
+initSuggestions();
+Kanban.init();
+
+function handleLogout() {
+  AuthService.logout();
+  window.location.replace('index.html');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Exposé — Topic Overlay Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ── Design tokens (will live in variables.css) ── */
+:root {
+  --bg:          #EDEAE2;
+  --surface:     #F8F6F1;
+  --surface2:    #F0EDE5;
+  --surface3:    #E5E1D7;
+  --ink:         #0F1117;
+  --ink-2:       #363B45;
+  --ink-muted:   #8A8F9A;
+  --accent:      #1A4FD6;
+  --accent-soft: #EBF0FD;
+  --accent-text: #1340B8;
+  --border:      #DDD8CD;
+  --border-soft: #E8E4DA;
+  --danger:      #C0392B;
+  --danger-soft: #FDECEA;
+  --warn:        #B45309;
+  --success:     #1A7A4A;
+  --font-ui:     'Syne', sans-serif;
+  --font-body:   'Manrope', sans-serif;
+  --font-mono:   'DM Mono', monospace;
+  --r-sm:   8px; --r-md:  12px; --r-lg:  16px;
+  --r-xl:  20px; --r-pill:999px;
+}
+[data-theme="dark"] {
+  --bg:          #0C0E12;
+  --surface:     #12151B;
+  --surface2:    #181C24;
+  --surface3:    #1E222C;
+  --ink:         #E8E4D8;
+  --ink-2:       #A8A49A;
+  --ink-muted:   #565C6A;
+  --accent:      #4B7BF5;
+  --accent-soft: #0D1830;
+  --accent-text: #7BA3FF;
+  --border:      #222730;
+  --border-soft: #1A1E26;
+  --danger:      #F87171;
+  --danger-soft: #220C0C;
+  --warn:        #F59E0B;
+  --success:     #34D374;
+}
+
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: var(--font-body); background: var(--bg); color: var(--ink); font-size: 14px; transition: background 0.2s, color 0.2s; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Demo scaffold (simulates dashboard bg) ── */
+.demo-bg {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 24px;
+  padding: 40px 24px;
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.demo-label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+  color: var(--ink-muted); text-transform: uppercase;
+}
+.demo-open-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: var(--r-pill); padding: 12px 24px;
+  font-family: var(--font-ui); font-size: 13px; font-weight: 700;
+  cursor: pointer; letter-spacing: 0.03em;
+  box-shadow: 0 4px 18px rgba(26,79,214,0.3);
+  transition: opacity 0.15s, transform 0.1s;
+}
+.demo-open-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.demo-open-btn svg { width: 13px; height: 13px; }
+.demo-theme-btn {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 8px 16px;
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  color: var(--ink-muted); cursor: pointer;
+  transition: all 0.15s;
+}
+.demo-theme-btn:hover { color: var(--ink); border-color: var(--border); }
+
+.topic-log {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 16px 20px;
+  min-width: 320px; max-width: 400px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.topic-log-title {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em;
+  color: var(--ink-muted); text-transform: uppercase; margin-bottom: 10px;
+}
+.topic-log-empty { font-size: 12px; color: var(--ink-muted); }
+.topic-log-item {
+  padding: 8px 0; border-bottom: 1px solid var(--border-soft);
+  animation: tagIn 0.2s ease both;
+}
+.topic-log-item:last-child { border-bottom: none; }
+.topic-log-name { font-family: var(--font-ui); font-size: 13px; font-weight: 600; color: var(--ink); }
+.topic-log-meta { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); margin-top: 2px; }
+@keyframes tagIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+</style>
+
+<!-- Overlay styles -->
+<link rel="stylesheet" href="css/overlay.css"/>
+</head>
+<body>
+
+<!-- ── Demo scaffold ── -->
+<div class="demo-bg">
+  <div class="demo-label">Exposé — Topic Creation Overlay</div>
+  <button class="demo-open-btn" onclick="Overlay.open()">
+    <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <line x1="6.5" y1="1" x2="6.5" y2="12"/>
+      <line x1="1" y1="6.5" x2="12" y2="6.5"/>
+    </svg>
+    Add Topic
+  </button>
+  <button class="demo-theme-btn" onclick="toggleTheme()">Toggle dark mode</button>
+
+  <div class="topic-log" id="topic-log">
+    <div class="topic-log-title">Created topics</div>
+    <div class="topic-log-empty" id="topic-log-empty">No topics yet — create one above</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     TOPIC CREATION OVERLAY
+     In dashboard.html this sits at the bottom of
+     <body> and is toggled by the Add Topic button.
+     ════════════════════════════════════════════ -->
+<div class="overlay-backdrop" id="overlay-backdrop" style="display:none" onclick="handleBackdropClick(event)">
+  <div class="overlay-card" onclick="event.stopPropagation()">
+
+    <!-- Header -->
+    <div class="overlay-header">
+      <div class="overlay-header-left">
+        <div class="overlay-step-label" id="overlay-step-label">Step 1 of 2</div>
+        <div class="overlay-title" id="overlay-title">New topic</div>
+        <div class="overlay-sub" id="overlay-sub">What do you want Exposé to monitor?</div>
+      </div>
+      <button class="overlay-close" onclick="Overlay.close()">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Progress -->
+    <div class="overlay-progress">
+      <div class="progress-pip active"></div>
+      <div class="progress-pip"></div>
+    </div>
+
+    <!-- Body -->
+    <div class="overlay-body">
+
+      <!-- ── STEP 1: Topic name ── -->
+      <div class="overlay-step active" id="step-1">
+        <input
+          class="topic-name-input"
+          id="topic-name-input"
+          type="text"
+          maxlength="60"
+          placeholder="e.g. Gaza ceasefire, TSMC earnings…"
+          oninput="Overlay.updateCharCount(this.value)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="field-error" id="topic-name-error">
+          <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+          </svg>
+          <span></span>
+        </div>
+        <div class="char-count" id="char-count">0 / 60</div>
+
+        <div class="topic-suggestions-label">Try a topic</div>
+        <div class="topic-suggestions" id="topic-suggestions"></div>
+      </div>
+
+      <!-- ── STEP 2: Sources ── -->
+      <div class="overlay-step" id="step-2">
+
+        <!-- X -->
+        <div class="source-section" id="source-section-x">
+          <div class="source-section-header" onclick="Overlay.toggleSection('x')">
+            <div class="source-icon x-icon">
+              <!-- X logo -->
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+            </div>
+            <span class="source-section-name">X (Twitter)</span>
+            <span class="source-section-count" id="x-count"></span>
+            <span class="source-chevron">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2,4 6,8 10,4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-type-toggle">
+              <button class="type-btn active" id="x-mode-topic" onclick="Overlay.setXMode('topic')">Topic search</button>
+              <button class="type-btn" id="x-mode-handle" onclick="Overlay.setXMode('handle')">Specific handle</button>
+            </div>
+            <div class="source-input-row">
+              <span class="source-prefix" id="x-prefix" style="display:none">@</span>
+              <input class="source-input" id="x-source-input" placeholder="e.g. AI regulation, GPT" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('x')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('x')">+ Add</button>
+            </div>
+            <div class="saved-hint">
+              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+              </svg>
+              Results pulled from Google-indexed X posts — no X API required
+            </div>
+            <div class="source-tags" id="x-tags"></div>
+          </div>
+        </div>
+
+        <!-- Reddit -->
+        <div class="source-section" id="source-section-reddit">
+          <div class="source-section-header" onclick="Overlay.toggleSection('reddit')">
+            <div class="source-icon reddit-icon">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/>
+              </svg>
+            </div>
+            <span class="source-section-name">Reddit</span>
+            <span class="source-section-count" id="reddit-count"></span>
+            <span class="source-chevron">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2,4 6,8 10,4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <span class="source-prefix" style="display:flex">r/</span>
+              <input class="source-input has-prefix" id="reddit-input" placeholder="worldnews, technology…" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('reddit')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('reddit')">+ Add</button>
+            </div>
+            <div class="saved-hint">
+              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+              </svg>
+              Results sourced from Google-indexed Reddit threads
+            </div>
+            <div class="source-tags" id="reddit-tags"></div>
+          </div>
+        </div>
+
+        <!-- Websites -->
+        <div class="source-section" id="source-section-web">
+          <div class="source-section-header" onclick="Overlay.toggleSection('web')">
+            <div class="source-icon web-icon">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="10" cy="10" r="8"/>
+                <path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/>
+                <line x1="2" y1="10" x2="18" y2="10"/>
+                <line x1="3" y1="6"  x2="17" y2="6"/>
+                <line x1="3" y1="14" x2="17" y2="14"/>
+              </svg>
+            </div>
+            <span class="source-section-name">Websites</span>
+            <span class="source-section-count" id="web-count"></span>
+            <span class="source-chevron">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2,4 6,8 10,4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <input class="source-input" id="web-input" placeholder="reuters.com, bbc.co.uk, techcrunch.com…" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('web')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('web')">+ Add</button>
+            </div>
+            <div class="saved-hint">
+              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+              </svg>
+              Domain only — no https:// or www needed
+            </div>
+            <div class="source-tags" id="web-tags"></div>
+          </div>
+        </div>
+
+        <!-- All-inclusive toggle -->
+        <div class="all-sources-block" id="all-sources-block" onclick="Overlay.toggleAllSources()">
+          <div class="all-sources-text">
+            <div class="all-sources-title">
+              Broad web search
+              <span class="all-sources-badge">Optional</span>
+            </div>
+            <div class="all-sources-desc">
+              In addition to your sources, Exposé will search the open web using AI-generated booster terms for this topic. Results shown in a separate expandable panel.
+            </div>
+          </div>
+          <div class="toggle-switch" id="all-sources-toggle"></div>
+        </div>
+
+        <!-- No sources warning -->
+        <div class="no-sources-note" id="no-sources-hint" style="display:none">
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <circle cx="6.5" cy="6.5" r="5.5"/>
+            <line x1="6.5" y1="4" x2="6.5" y2="7"/>
+            <circle cx="6.5" cy="9" r="0.5" fill="currentColor"/>
+          </svg>
+          Add at least one source, or enable broad web search above.
+        </div>
+
+      </div><!-- /step-2 -->
+    </div><!-- /overlay-body -->
+
+    <!-- Footer -->
+    <div class="overlay-footer">
+      <div class="overlay-footer-left">
+        <div class="step-hint" id="overlay-footer-hint">
+          <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+            <polyline points="2,5.5 4.5,8 9,3"/>
+          </svg>
+          Press Enter to continue
+        </div>
+      </div>
+      <div class="overlay-footer-right">
+        <button class="btn-back" id="overlay-back-btn" style="display:none" onclick="goBack()">← Back</button>
+        <button class="btn-next" id="overlay-next-btn" onclick="handleNext()">
+          <div class="spinner"></div>
+          <span class="btn-next-label">Continue</span>
+          <svg class="next-arrow" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="1" y1="6" x2="11" y2="6"/>
+            <polyline points="7,2 11,6 7,10"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+  </div><!-- /overlay-card -->
+</div><!-- /overlay-backdrop -->
+
+<!-- Scripts -->
+<script src="js/topic-overlay.js"></script>
+<script>
+/* Demo glue — this logic lives in dashboard.js in the full build */
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+}
+
+function handleNext() {
+  const step = document.querySelector('.overlay-step.active')?.id;
+  if (step === 'step-1') Overlay.goToStep2();
+  else Overlay.submit();
+}
+
+function goBack() {
+  // Move back to step 1
+  document.querySelectorAll('.overlay-step').forEach((el, i) => el.classList.toggle('active', i === 0));
+  document.querySelectorAll('.progress-pip').forEach((pip, i) => {
+    pip.classList.toggle('done', false);
+    pip.classList.toggle('active', i === 0);
+  });
+  document.getElementById('overlay-step-label').textContent = 'Step 1 of 2';
+  document.getElementById('overlay-title').textContent = 'New topic';
+  document.getElementById('overlay-sub').textContent = 'What do you want Exposé to monitor?';
+  document.getElementById('overlay-back-btn').style.display = 'none';
+  document.getElementById('overlay-footer-hint').style.display = 'flex';
+  const label = document.querySelector('.btn-next-label');
+  if (label) label.textContent = 'Continue';
+  const arrow = document.querySelector('.next-arrow');
+  if (arrow) arrow.style.display = 'block';
+  setTimeout(() => document.getElementById('topic-name-input')?.focus(), 50);
+}
+
+function handleBackdropClick(e) {
+  if (e.target === document.getElementById('overlay-backdrop')) Overlay.close();
+}
+
+// Populate suggestions
+const suggestionsEl = document.getElementById('topic-suggestions');
+['AI regulation','Gaza ceasefire','TSMC earnings','Climate policy','Fed rates','SpaceX'].forEach(s => {
+  const pill = document.createElement('button');
+  pill.className = 'suggestion-pill';
+  pill.textContent = s;
+  pill.onclick = () => Overlay.setSuggestion(s);
+  suggestionsEl.appendChild(pill);
+});
+
+// Listen for topic:created and update demo log
+document.addEventListener('topic:created', e => {
+  const topic = e.detail;
+  const log = document.getElementById('topic-log');
+  const empty = document.getElementById('topic-log-empty');
+  if (empty) empty.remove();
+
+  const item = document.createElement('div');
+  item.className = 'topic-log-item';
+  const srcCount = topic.sources.x.length + topic.sources.reddit.length + topic.sources.web.length;
+  const srcNote  = topic.allSourcesEnabled ? `${srcCount} sources + broad web` : `${srcCount} source${srcCount !== 1 ? 's' : ''}`;
+  item.innerHTML = `
+    <div class="topic-log-name">${topic.name}</div>
+    <div class="topic-log-meta">${srcNote} · ${new Date(topic.createdAt).toLocaleTimeString()}</div>`;
+  log.appendChild(item);
+});
+</script>
+</body>
+</html>

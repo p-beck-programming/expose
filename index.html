@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Exposé — OSINT Monitor</title>
+<link rel="stylesheet" href="css/variables.css"/>
+<link rel="stylesheet" href="css/base.css"/>
+<link rel="stylesheet" href="css/components.css"/>
+<link rel="stylesheet" href="css/nav.css"/>
+<link rel="stylesheet" href="css/landing.css"/>
+</head>
+<body class="dot-bg">
+
+<!-- ── Top nav ── -->
+<nav class="topnav">
+  <a class="topnav-brand" href="index.html">
+    <div class="topnav-mark">
+      <svg viewBox="0 0 15 15" fill="none" stroke="#F8F6F1" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="7.5" cy="7.5" r="5.5"/>
+        <circle cx="7.5" cy="7.5" r="2"/>
+        <line x1="7.5" y1="2"   x2="7.5" y2="5.5"/>
+        <line x1="7.5" y1="9.5" x2="7.5" y2="13"/>
+        <line x1="2"   y1="7.5" x2="5.5" y2="7.5"/>
+        <line x1="9.5" y1="7.5" x2="13"  y2="7.5"/>
+      </svg>
+    </div>
+    <span class="topnav-name">EXPOSÉ</span>
+  </a>
+  <div class="topnav-right">
+    <button class="topnav-theme" onclick="Theme.toggle()" title="Toggle theme">
+      <svg class="theme-icon-sun" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="6.5" cy="6.5" r="2.2"/>
+        <line x1="6.5" y1="1" x2="6.5" y2="2.4"/><line x1="6.5" y1="10.6" x2="6.5" y2="12"/>
+        <line x1="1"   y1="6.5" x2="2.4" y2="6.5"/><line x1="10.6" y1="6.5" x2="12" y2="6.5"/>
+        <line x1="2.8" y1="2.8" x2="3.8" y2="3.8"/><line x1="9.2" y1="9.2" x2="10.2" y2="10.2"/>
+        <line x1="10.2" y1="2.8" x2="9.2" y2="3.8"/><line x1="3.8" y1="9.2" x2="2.8" y2="10.2"/>
+      </svg>
+      <svg class="theme-icon-moon" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <path d="M11 8.5A5 5 0 0 1 4.5 2 5 5 0 1 0 11 8.5z"/>
+      </svg>
+    </button>
+    <a href="login.html" class="btn btn-ghost btn-sm">Sign in</a>
+    <a href="signup.html" class="btn btn-primary btn-sm">Get started</a>
+  </div>
+</nav>
+
+<!-- ── Landing content ── -->
+<div class="landing-page">
+  <div class="landing-content">
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-eyebrow">
+        <span class="eyebrow-dot"></span>
+        Open-source intelligence, simplified
+      </div>
+      <h1 class="hero-headline">
+        Monitor what matters.<br/>
+        <span class="headline-accent">Across every source.</span>
+      </h1>
+      <p class="hero-sub">
+        Exposé tracks topics across X, Reddit, and the open web — surfacing what's being said, how many sources are reporting, and whether they agree.
+      </p>
+      <div class="hero-actions">
+        <a href="signup.html" class="btn btn-primary btn-lg">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="7" x2="13" y2="7"/>
+          </svg>
+          <span class="btn-label">Start monitoring free</span>
+        </a>
+        <a href="login.html" class="btn btn-ghost btn-lg">Sign in</a>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features">
+      <div class="features-eyebrow">What Exposé does</div>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="10" cy="10" r="8"/>
+              <circle cx="10" cy="10" r="3"/>
+              <line x1="10" y1="2"  x2="10" y2="7"/>
+              <line x1="10" y1="13" x2="10" y2="18"/>
+              <line x1="2"  y1="10" x2="7"  y2="10"/>
+              <line x1="13" y1="10" x2="18" y2="10"/>
+            </svg>
+          </div>
+          <div class="feature-title">Real-time monitoring</div>
+          <div class="feature-desc">Exposé continuously scans your chosen sources on a schedule you control — from every 5 minutes to every 4 hours — so you never miss a developing story.</div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="5" height="14" rx="2"/>
+              <rect x="9" y="3" width="5" height="14" rx="2"/>
+              <rect x="16" y="3" width="3" height="14" rx="1.5"/>
+            </svg>
+          </div>
+          <div class="feature-title">Custom source control</div>
+          <div class="feature-desc">Define exactly where Exposé looks — specific X accounts or topics, subreddits, and reporting websites. Your intelligence, tuned to your sources.</div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 14s2-7 7-7 7 7 7 7"/>
+              <circle cx="10" cy="6" r="2.5"/>
+              <line x1="3" y1="16" x2="17" y2="16"/>
+            </svg>
+          </div>
+          <div class="feature-title">Similarity & consensus scoring</div>
+          <div class="feature-desc">See not just what sources say, but how much they agree. Exposé scores consensus so you can spot divergent narratives and emerging angles instantly.</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Proof strip -->
+    <div class="proof-strip">
+      <div class="proof-item">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1,7 5,11 13,3"/>
+        </svg>
+        Free to get started
+      </div>
+      <div class="proof-item">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="5" width="10" height="8" rx="1.5"/>
+          <path d="M5 5V3.5a2 2 0 0 1 4 0V5"/>
+        </svg>
+        No credit card required
+      </div>
+      <div class="proof-item">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <circle cx="7" cy="7" r="5.5"/>
+          <polyline points="7,4 7,7.5 9.5,9"/>
+        </svg>
+        Hourly refresh by default
+      </div>
+      <div class="proof-item">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1,5 7,1 13,5 13,13 1,13 1,5"/>
+          <rect x="5" y="8" width="4" height="5" rx="0.5"/>
+        </svg>
+        Powered by Gemini + Google Search
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="js/auth.service.js"></script>
+<script src="js/utils.js"></script>
+<script>
+  Theme.init();
+  // Redirect logged-in users straight to dashboard
+  if (AuthService.isAuthenticated()) window.location.replace('dashboard.html');
+</script>
+</body>
+</html>
