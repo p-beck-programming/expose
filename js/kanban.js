@@ -36,10 +36,22 @@ const Kanban = (() => {
     // Listen for new topics from the overlay
     document.addEventListener('topic:created', async e => {
       const topic = e.detail;
+      // Set fetching immediately so the first render shows skeletons, not the idle message
+      topic.status = 'fetching';
       topics.unshift(topic);
       renderBoard();
       renderSearchLog();
-      // Immediately fetch subtopics
+      // Check for API key before fetching — show clear error if missing
+      if (!GeminiService.getApiKey()) {
+        await TopicService.updateTopic(topic.id, {
+          status: 'error',
+          errorMessage: 'No API key set. Go to Settings → Intelligence to add your Gemini API key.',
+        });
+        topic.status = 'error';
+        topic.errorMessage = 'No API key set. Go to Settings → Intelligence to add your Gemini API key.';
+        renderColumn(topic.id);
+        return;
+      }
       fetchTopicData(topic.id);
     });
   }
@@ -63,8 +75,10 @@ const Kanban = (() => {
         if (idx !== -1) topics[idx] = updated.topic;
       }
     } else {
-      await TopicService.updateTopic(topicId, { status: 'error' });
+      const errorMessage = result.message || 'Something went wrong. Please try again.';
+      await TopicService.updateTopic(topicId, { status: 'error', errorMessage });
       topic.status = 'error';
+      topic.errorMessage = errorMessage;
     }
 
     updateColFetchingState(topicId, false);
@@ -197,11 +211,28 @@ const Kanban = (() => {
 
     // ── Body
     const body = el('div', 'col-body');
+    const isError = topic.status === 'error';
 
     if (isFetching && active.length === 0) {
-      // Show skeleton cards
+      // Fetching -- show skeletons
       [1, 2, 3].forEach(() => body.appendChild(buildSkeleton()));
-    } else if (active.length === 0 && !isFetching) {
+    } else if (isError && active.length === 0) {
+      // Error state
+      const errorMsg = topic.errorMessage || 'Something went wrong fetching data.';
+      body.innerHTML = `
+        <div class="col-empty">
+          <div class="col-empty-ring" style="border-color:var(--danger);color:var(--danger)">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+              <circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/>
+              <circle cx="8" cy="10.5" r="0.6" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="col-empty-text" style="color:var(--danger)">${esc(errorMsg)}</div>
+          <button style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:var(--r-pill);padding:5px 14px;font-family:var(--font-ui);font-size:11px;font-weight:600;color:var(--ink-muted);cursor:pointer"
+            onclick="Kanban.refreshCard('${topic.id}')">\u21bb Retry</button>
+        </div>`;
+    } else if (active.length === 0 && topic.status === 'idle') {
+      // Idle -- waiting for first fetch
       body.innerHTML = `
         <div class="col-empty">
           <div class="col-empty-ring">
@@ -210,7 +241,19 @@ const Kanban = (() => {
               <circle cx="8" cy="10.5" r="0.6" fill="currentColor"/>
             </svg>
           </div>
-          <div class="col-empty-text">No subtopics yet.<br/>Data is loading…</div>
+          <div class="col-empty-text">Fetching subtopics\u2026</div>
+        </div>`;
+    } else if (active.length === 0) {
+      // Fetched but nothing found
+      body.innerHTML = `
+        <div class="col-empty">
+          <div class="col-empty-ring">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+              <circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/>
+              <circle cx="8" cy="10.5" r="0.6" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="col-empty-text">No subtopics found.<br/>Try refreshing.</div>
         </div>`;
     } else {
       // Sort: highest score first

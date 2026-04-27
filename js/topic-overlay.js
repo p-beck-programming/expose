@@ -13,7 +13,7 @@
    Migration to Vite+React:
    - This module becomes <TopicOverlay /> component
    - Sources state maps to useState([])
-   - TopicService.create() maps to a POST /api/topics call
+   - TopicService.createTopic() maps to a POST /api/topics call
    ═══════════════════════════════════════════════ */
 
 /* TopicService is loaded from topic.service.js before this file — no stub needed */
@@ -172,7 +172,7 @@ const Overlay = (() => {
 
     if (btn) { btn.classList.add('loading'); btn.disabled = true; }
 
-    const result = await TopicService.create({
+    const result = await TopicService.createTopic({
       name: $('topic-name-input')?.value?.trim(),
       sources,
       allSourcesEnabled,
