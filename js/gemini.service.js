@@ -1,6 +1,7 @@
 /* ═══════════════════════════════════════════════
    EXPOSÉ — gemini.service.js
 
+<<<<<<< Updated upstream
    Handles all Gemini API calls with Google Search
    grounding. Two-pass approach:
      Pass 1 — fetch raw source data via search grounding
@@ -56,12 +57,73 @@
       groundingMetadata, you display it to the user.
       We store it on each subtopic and kanban.js
       renders it in the full-screen overlay.
+=======
+   Single-pass approach (optimization 1):
+   One API call searches, reads, and returns
+   structured subtopics. No second pass needed.
+
+   Optimizations applied:
+     1. Single pass — halves API call count
+     2. maxOutputTokens: 1200, thinkingConfig.thinkingBudget: 0
+      thinkingBudget:0 disables internal chain-of-thought on 2.5
+      models, saving ~2200 tokens per call. Do not set both
+      thinkingBudget and thinkingLevel — 400 error will result.
+     3. Tighter, directive prompt language
+     4. Fixed at exactly 3 subtopics per refresh
+     5. 6 total sources per subtopic max (hard trim)
+        with rotation across user-defined sources
+
+   Broad web search remains a separate optional call,
+   only triggered when topic.allSourcesEnabled = true.
+
+   Source rotation (suggestion 5):
+   Each refresh increments topic.sourceRotationOffset
+   by 1 (persisted via TopicService.updateTopic).
+   _getRotatedSources() uses this offset to slice a
+   window of up to 6 sources across all source types,
+   distributing proportionally. Over N refreshes every
+   user-defined source gets included in rotation.
+
+   30-minute cache guard (suggestion 7, Option A):
+   fetchSubtopics() checks topic.updatedAt before
+   calling Gemini. If data is less than 30 minutes
+   old it returns the cached subtopics immediately,
+   consuming zero tokens.
+
+   DEPLOYMENT NOTES:
+   1. MODEL: gemini-2.5-flash-lite — budget/speed tier of
+      the 2.5 family. No thinking tokens, high RPD, designed
+      for high-volume low-latency tasks. Do NOT use:
+      - gemini-2.0-flash (shuts down June 1 2026)
+      - gemini-1.5-flash (shut down, returns 404)
+      - gemini-2.5-flash (thinking model, ~2200 tokens/call)
+   2. API KEY: localStorage expose_settings_v1.
+      Move server-side for multi-user production.
+   3. CORS: Direct browser fetch allowed by Google.
+   4. HTTPS: Required. file:// blocked by Gemini.
+   5. FREE TIER: 15 RPM, 1M tokens/day, 500 grounded
+      requests/day. Single-pass + cache guard makes
+      this viable for 4-6 topics at hourly refresh.
+   6. MIGRATION: Replace _callGemini() fetch() with
+      proxy endpoint. Nothing else changes.
+   7. SUGGESTION 6 (skipped, revisit if needed):
+      Only refresh topics viewed in last 24h.
+      Track topic.lastViewedAt in topic.service.js.
+>>>>>>> Stashed changes
    ═══════════════════════════════════════════════ */
 
 const GeminiService = (() => {
 
+<<<<<<< Updated upstream
   const MODEL   = 'gemini-2.5-flash';
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+=======
+  const MODEL         = 'gemini-2.5-flash-lite'; // budget/speed model: no thinking tokens, high RPD, not deprecated
+  const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+  const MAX_SOURCES   = 6;  // hard cap on total sources per subtopic
+  const MAX_SUBTOPICS = 3;  // fixed subtopic count per refresh
+  const CACHE_MINUTES = 30; // skip fetch if data is fresher than this
+>>>>>>> Stashed changes
 
   /* ── Get API key from settings ── */
   function getApiKey() {
@@ -79,8 +141,14 @@ const GeminiService = (() => {
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
+<<<<<<< Updated upstream
         temperature:    1.0,  // recommended for grounding per Google docs
         maxOutputTokens: 2048,
+=======
+        temperature:     1.0,  // required for grounding per Google docs
+        maxOutputTokens: 1200, // sufficient for flash-lite responses
+        thinkingConfig:  { thinkingBudget: 0 }, // disable thinking tokens — saves ~2200 tokens/call
+>>>>>>> Stashed changes
       },
     };
 
