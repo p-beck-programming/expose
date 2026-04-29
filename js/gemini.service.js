@@ -1,63 +1,6 @@
 /* ═══════════════════════════════════════════════
    EXPOSÉ — gemini.service.js
 
-<<<<<<< Updated upstream
-   Handles all Gemini API calls with Google Search
-   grounding. Two-pass approach:
-     Pass 1 — fetch raw source data via search grounding
-     Pass 2 — ask Gemini to read that data and identify
-               subtopics from the actual inflow
-
-   DEPLOYMENT NOTES:
-   ─────────────────
-   1. MODEL: Uses gemini-2.5-flash. Do NOT use
-      gemini-2.0-flash — it has a known grounding
-      bug as of April 2026 and shuts down June 2026.
-
-   2. API KEY: The key is read from localStorage key
-      'expose_settings_v1' → geminiApiKey. It is sent
-      directly from the browser to Google's API. This
-      is fine for personal/single-user use. For a
-      multi-user production app, move this server-side
-      so the key is never exposed to the client.
-
-   3. CORS: Google's Gemini API allows browser-based
-      (client-side) fetch calls directly. No proxy
-      needed for personal use on GitHub Pages.
-
-   4. HTTPS: GitHub Pages serves HTTPS by default.
-      Gemini API blocks requests from non-HTTPS
-      origins. Do not test from file:// — always
-      use a local server (python3 -m http.server)
-      or your live GitHub Pages URL.
-
-   5. RATE LIMITS (free tier):
-      - 15 requests per minute (RPM)
-      - 1,000,000 tokens per day
-      - 500 search-grounded requests per day
-      With hourly refresh + multiple topics, you can
-      easily hit 500/day. Monitor usage at:
-      https://aistudio.google.com
-
-   6. MIGRATION: To move the API key server-side,
-      replace the fetch() call in _callGemini() with
-      a call to your own proxy endpoint:
-        fetch('/api/gemini', { method:'POST', body:... })
-      Your proxy then calls Gemini with the server-
-      stored key and returns the result. No other
-      code changes needed.
-
-   7. JSON PARSING: Gemini sometimes wraps JSON in
-      markdown fences (```json ... ```). The
-      _extractJSON() helper strips these safely.
-
-   8. SEARCH GROUNDING DISPLAY REQUIREMENT: Google's
-      terms require that if a response includes
-      searchEntryPoint.renderedContent in the
-      groundingMetadata, you display it to the user.
-      We store it on each subtopic and kanban.js
-      renders it in the full-screen overlay.
-=======
    Single-pass approach (optimization 1):
    One API call searches, reads, and returns
    structured subtopics. No second pass needed.
@@ -109,21 +52,15 @@
    7. SUGGESTION 6 (skipped, revisit if needed):
       Only refresh topics viewed in last 24h.
       Track topic.lastViewedAt in topic.service.js.
->>>>>>> Stashed changes
    ═══════════════════════════════════════════════ */
 
 const GeminiService = (() => {
 
-<<<<<<< Updated upstream
-  const MODEL   = 'gemini-2.5-flash';
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-=======
   const MODEL         = 'gemini-2.5-flash-lite'; // budget/speed model: no thinking tokens, high RPD, not deprecated
   const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
   const MAX_SOURCES   = 6;  // hard cap on total sources per subtopic
   const MAX_SUBTOPICS = 3;  // fixed subtopic count per refresh
   const CACHE_MINUTES = 30; // skip fetch if data is fresher than this
->>>>>>> Stashed changes
 
   /* ── Get API key from settings ── */
   function getApiKey() {
@@ -141,14 +78,9 @@ const GeminiService = (() => {
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-<<<<<<< Updated upstream
-        temperature:    1.0,  // recommended for grounding per Google docs
-        maxOutputTokens: 2048,
-=======
         temperature:     1.0,  // required for grounding per Google docs
         maxOutputTokens: 1200, // sufficient for flash-lite responses
         thinkingConfig:  { thinkingBudget: 0 }, // disable thinking tokens — saves ~2200 tokens/call
->>>>>>> Stashed changes
       },
     };
 
