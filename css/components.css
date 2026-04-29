@@ -35,6 +35,17 @@
 }
 .btn-ghost:hover { background: var(--surface2); color: var(--ink); }
 
+.btn-warn {
+  background: var(--warn); color: #fff; border: none;
+}
+.btn-warn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+.btn-danger-outline {
+  background: transparent; color: var(--danger);
+  border: 1px solid rgba(192,57,43,0.35);
+}
+.btn-danger-outline:hover { background: var(--danger-soft); border-color: var(--danger); }
+
 .btn-danger-outline {
   background: transparent; color: var(--danger);
   border: 1px solid rgba(192,57,43,0.3);

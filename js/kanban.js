@@ -178,6 +178,7 @@ const Kanban = (() => {
     const col = el('div', 'kanban-col');
     col.id = `col-${topic.id}`;
     col.setAttribute('data-topic-id', topic.id);
+    if (topic.paused) col.classList.add('paused');
 
     const subtopics  = (topic.subtopics || []).filter(s => !s.pinned);
     const active     = subtopics.filter(s => !s.expired);
@@ -200,6 +201,7 @@ const Kanban = (() => {
       </div>
       <div class="col-header-right">
         ${unviewed > 0 ? `<span class="unviewed-badge">${unviewed}</span>` : ''}
+        ${topic.paused ? `<span class="paused-badge">PAUSED</span>` : ''}
         <button class="col-menu-btn" title="Column options" onclick="Kanban.openColMenu('${topic.id}', event)">
           <svg viewBox="0 0 13 13" fill="currentColor">
             <circle cx="6.5" cy="2.5" r="1.2"/><circle cx="6.5" cy="6.5" r="1.2"/><circle cx="6.5" cy="10.5" r="1.2"/>
@@ -536,25 +538,85 @@ const Kanban = (() => {
 
   function openColMenu(topicId, event) {
     event.stopPropagation();
-    // Simple inline menu (can be upgraded to a proper dropdown later)
+    const btn   = event.currentTarget;
     const topic = topics.find(t => t.id === topicId);
     if (!topic) return;
-    const action = prompt(`Topic: "${topic.name}"\n\nType an action:\n- rename\n- delete`);
-    if (!action) return;
-    if (action.trim() === 'rename') {
-      const name = prompt('New topic name:', topic.name);
-      if (name?.trim()) {
-        TopicService.updateTopic(topicId, { name: name.trim() });
-        topic.name = name.trim();
-        renderBoard();
-      }
-    } else if (action.trim() === 'delete') {
-      if (confirm(`Delete topic "${topic.name}"? This cannot be undone.`)) {
-        TopicService.deleteTopic(topicId);
-        topics = topics.filter(t => t.id !== topicId);
-        renderBoard();
-      }
-    }
+
+    // Close any existing dropdown first
+    ColMenu.closeDropdown();
+
+    // Build dropdown
+    const isPaused = !!topic.paused;
+    const dd = document.createElement('div');
+    dd.className = 'col-dropdown';
+    dd.id = 'col-dropdown-active';
+
+    dd.innerHTML = `
+      <div class="col-dropdown-section">
+        <div class="col-dropdown-label">${esc(topic.name)}</div>
+        <button class="col-dropdown-item" onclick="ColMenu.refreshTopic('${topicId}')">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.5 7a5.5 5.5 0 1 1-5.5-5.5c1.5 0 2.9.6 3.9 1.6"/>
+            <polyline points="11,1.5 11,4 13.5,4"/>
+          </svg>
+          Refresh now
+        </button>
+        <button class="col-dropdown-item ${isPaused ? 'item-paused' : ''}" onclick="ColMenu.togglePauseTopic('${topicId}')">
+          ${isPaused ? `
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="3,2 11,7 3,12"/>
+          </svg>
+          Resume auto-refresh` : `
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="2" x2="4" y2="12"/><line x1="10" y1="2" x2="10" y2="12"/>
+          </svg>
+          Pause auto-refresh`}
+        </button>
+        <button class="col-dropdown-item" onclick="ColMenu.openEditSources('${topicId}')">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="7" cy="7" r="5.5"/>
+            <line x1="7" y1="4" x2="7" y2="10"/>
+            <line x1="4" y1="7" x2="10" y2="7"/>
+          </svg>
+          Edit sources
+        </button>
+      </div>
+      <div class="col-dropdown-section">
+        <button class="col-dropdown-item item-warn" onclick="ColMenu.confirmClear('${topicId}')">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="2,4 12,4"/><path d="M5 4V3h4v1"/><path d="M3 4l1 8h6l1-8"/>
+            <line x1="6" y1="7" x2="6" y2="10"/><line x1="8" y1="7" x2="8" y2="10"/>
+          </svg>
+          Clear subtopics
+        </button>
+        <button class="col-dropdown-item item-danger" onclick="ColMenu.confirmDelete('${topicId}')">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="2,4 12,4"/><path d="M5 4V3h4v1"/><path d="M3 4l1 8h6l1-8"/>
+          </svg>
+          Delete topic
+        </button>
+      </div>`;
+
+    // Position anchored to button, respecting viewport edges
+    document.body.appendChild(dd);
+    const btnRect = btn.getBoundingClientRect();
+    const ddRect  = dd.getBoundingClientRect();
+    let top  = btnRect.bottom + 6;
+    let left = btnRect.right - ddRect.width;
+    // Clamp to viewport
+    if (left < 8) left = 8;
+    if (top + ddRect.height > window.innerHeight - 8) top = btnRect.top - ddRect.height - 6;
+    dd.style.top  = `${top}px`;
+    dd.style.left = `${left}px`;
+
+    // Mark button active
+    btn.classList.add('active');
+    ColMenu._activeBtn = btn;
+
+    // Close on outside click
+    setTimeout(() => {
+      document.addEventListener('click', ColMenu._outsideClick, { once: true });
+    }, 0);
   }
 
   /* ════════════════════════════════
@@ -675,11 +737,9 @@ const Kanban = (() => {
   }
 
   async function rerunSearch(logId, query, topicName) {
-    const confirmed = confirm(`You're about to re-run the search results of:\n\n"${query}"\n\nProceed?`);
-    if (!confirmed) return;
-    const topic = topics.find(t => t.name === topicName);
-    if (topic) await fetchTopicData(topic.id);
-    else alert('Original topic no longer exists. Create a new topic to search again.');
+    // Use styled confirm modal instead of native confirm()
+    ColMenu._pendingRerun = { query, topicName };
+    ColMenu.showRerunConfirm(query);
   }
 
   /* ════════════════════════════════
@@ -750,6 +810,11 @@ const Kanban = (() => {
     return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="${size}" height="${size}"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>`;
   }
 
+  function removeTopicFromBoard(topicId) {
+    topics = topics.filter(t => t.id !== topicId);
+    renderBoard();
+  }
+
   /* ── Public API ── */
   return {
     init,
@@ -765,7 +830,265 @@ const Kanban = (() => {
     rerunSearch,
     renderSearchLog,
     fetchTopicData,
+    removeTopicFromBoard,
   };
 })();
 
 window.Kanban = Kanban;
+
+/* ════════════════════════════════════════════
+   ColMenu — column dropdown + modal controller
+   Sits outside the Kanban IIFE so it can be
+   called from inline onclick handlers in the
+   dropdown HTML and from modal buttons.
+════════════════════════════════════════════ */
+const ColMenu = (() => {
+  let _pendingAction = null; // { type, topicId }
+  let _editTopicId   = null;
+  let _editSources   = { x: [], reddit: [], web: [] };
+  let _pendingRerun = null; // { query, topicName }
+
+  function showRerunConfirm(query) {
+    _pendingAction = { type: 'rerun' };
+    showConfirm({
+      icon:        'warn',
+      title:       'Re-run this search?',
+      body:        `You're about to re-run: <strong>${esc(query)}</strong>. This will use one API call.`,
+      actionLabel: 'Yes, re-run',
+      actionClass: 'btn-primary',
+    });
+  }
+
+  let _activeBtn     = null;
+
+  /* ── Dropdown ── */
+  function closeDropdown() {
+    document.getElementById('col-dropdown-active')?.remove();
+    _activeBtn?.classList.remove('active');
+    _activeBtn = null;
+    document.removeEventListener('click', _outsideClick);
+  }
+
+  function _outsideClick(e) {
+    if (!document.getElementById('col-dropdown-active')?.contains(e.target)) {
+      closeDropdown();
+    }
+  }
+
+  /* ── Refresh ── */
+  function refreshTopic(topicId) {
+    closeDropdown();
+    Kanban.fetchTopicData(topicId);
+  }
+
+  /* ── Pause / Resume ── */
+  async function togglePauseTopic(topicId) {
+    closeDropdown();
+    const allTopics = await TopicService.getTopics();
+    const topic     = allTopics.find(t => t.id === topicId);
+    if (!topic) return;
+    const nowPaused = !topic.paused;
+    await TopicService.updateTopic(topicId, { paused: nowPaused });
+    Kanban.renderColumn(topicId);
+  }
+
+  /* ── Clear subtopics — show confirm ── */
+  function confirmClear(topicId) {
+    closeDropdown();
+    const topics = TopicService.getTopics();
+    const topic  = Array.isArray(topics) ? topics.find(t => t.id === topicId) : null;
+    const name   = topic?.name || 'this topic';
+    _pendingAction = { type: 'clear', topicId };
+    showConfirm({
+      icon:      'warn',
+      title:     'Clear all subtopics?',
+      body:      `This will permanently remove all subtopics from <strong>${esc(name)}</strong>. The topic and its sources will remain. Exposé will generate fresh subtopics on the next refresh.`,
+      actionLabel: 'Yes, clear subtopics',
+      actionClass: 'btn-warn',
+    });
+  }
+
+  /* ── Delete topic — show confirm ── */
+  function confirmDelete(topicId) {
+    closeDropdown();
+    const topics = TopicService.getTopics();
+    const topic  = Array.isArray(topics) ? topics.find(t => t.id === topicId) : null;
+    const name   = topic?.name || 'this topic';
+    _pendingAction = { type: 'delete', topicId };
+    showConfirm({
+      icon:        'danger',
+      title:       'Delete topic?',
+      body:        `<strong>${esc(name)}</strong> and all its subtopics will be permanently deleted. This cannot be undone.`,
+      actionLabel: 'Yes, delete topic',
+      actionClass: 'btn-danger-outline',
+    });
+  }
+
+  /* ── Confirm modal helpers ── */
+  function showConfirm({ icon, title, body, actionLabel, actionClass }) {
+    const backdrop  = document.getElementById('confirm-modal-backdrop');
+    const iconWrap  = document.getElementById('confirm-modal-icon');
+    const titleEl   = document.getElementById('confirm-modal-title');
+    const bodyEl    = document.getElementById('confirm-modal-body');
+    const actionBtn = document.getElementById('confirm-modal-action-btn');
+    if (!backdrop) return;
+
+    iconWrap.className  = `confirm-modal-icon ${icon === 'warn' ? 'warn-icon' : 'danger-icon'}`;
+    iconWrap.innerHTML  = icon === 'warn'
+      ? `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1L1 17h16L9 1z"/><line x1="9" y1="7" x2="9" y2="11"/><circle cx="9" cy="14" r="0.5" fill="currentColor"/></svg>`
+      : `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><polyline points="2,4 16,4"/><path d="M6 4V3h6v1"/><path d="M4 4l1.5 12h7L14 4"/><line x1="7" y1="8" x2="7" y2="13"/><line x1="11" y1="8" x2="11" y2="13"/></svg>`;
+
+    titleEl.textContent  = title;
+    bodyEl.innerHTML     = body;
+    actionBtn.className  = `btn btn-sm ${actionClass}`;
+    actionBtn.textContent = actionLabel;
+
+    backdrop.classList.add('open');
+  }
+
+  function closeConfirm() {
+    document.getElementById('confirm-modal-backdrop')?.classList.remove('open');
+    _pendingAction = null;
+  }
+
+  function handleBackdropClick(e) {
+    if (e.target === document.getElementById('confirm-modal-backdrop')) closeConfirm();
+  }
+
+  async function confirmAction() {
+    if (!_pendingAction) return;
+    const { type, topicId } = _pendingAction;
+    closeConfirm();
+
+    if (type === 'rerun' && _pendingRerun) {
+      const { topicName } = _pendingRerun;
+      _pendingRerun = null;
+      const allTopics = await TopicService.getTopics();
+      const topic = allTopics.find(t => t.name === topicName);
+      if (topic) Kanban.fetchTopicData(topic.id);
+    }
+
+    if (type === 'clear') {
+      await TopicService.updateTopic(topicId, { subtopics: [] });
+      const localTopics = await TopicService.getTopics();
+      const topic = localTopics.find(t => t.id === topicId);
+      if (topic) topic.subtopics = [];
+      Kanban.renderColumn(topicId);
+    }
+
+    if (type === 'delete') {
+      await TopicService.deleteTopic(topicId);
+      Kanban.removeTopicFromBoard(topicId);
+    }
+  }
+
+  /* ── Edit sources ── */
+  async function openEditSources(topicId) {
+    closeDropdown();
+    const allTopics = await TopicService.getTopics();
+    const topic = allTopics.find(t => t.id === topicId);
+    if (!topic) return;
+
+    _editTopicId = topicId;
+    _editSources = {
+      x:      [...(topic.sources?.x      || [])],
+      reddit: [...(topic.sources?.reddit || [])],
+      web:    [...(topic.sources?.web    || [])],
+    };
+
+    document.getElementById('edit-sources-topic-name').textContent =
+      `Editing sources for "${topic.name}"`;
+
+    renderEditTags();
+    ['x','reddit','web'].forEach(t => {
+      const el = document.getElementById(`edit-${t}-input`);
+      if (el) el.value = '';
+    });
+
+    document.getElementById('edit-sources-backdrop')?.classList.add('open');
+  }
+
+  function renderEditTags() {
+    ['x','reddit','web'].forEach(type => {
+      const container = document.getElementById(`edit-${type}-tags`);
+      if (!container) return;
+      container.innerHTML = '';
+      (_editSources[type] || []).forEach(val => {
+        const tag = document.createElement('div');
+        tag.className = 'edit-source-tag';
+        tag.innerHTML = `<span>${esc(val)}</span>
+          <button onclick="ColMenu.removeEditSource('${type}','${esc(val)}')" title="Remove">
+            <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
+            </svg>
+          </button>`;
+        container.appendChild(tag);
+      });
+    });
+  }
+
+  function addEditSource(type) {
+    const input = document.getElementById(`edit-${type}-input`);
+    if (!input) return;
+    let val = input.value.trim();
+    if (!val) return;
+    if (type === 'reddit') val = 'r/' + val.replace(/^r\//, '');
+    if (type === 'x' && !val.startsWith('@') && !val.includes(' ')) val = '@' + val;
+    if (_editSources[type].includes(val)) { input.value = ''; return; }
+    _editSources[type].push(val);
+    input.value = '';
+    renderEditTags();
+  }
+
+  function removeEditSource(type, val) {
+    _editSources[type] = _editSources[type].filter(v => v !== val);
+    renderEditTags();
+  }
+
+  function closeEditSources() {
+    document.getElementById('edit-sources-backdrop')?.classList.remove('open');
+    _editTopicId = null;
+  }
+
+  function handleEditBackdropClick(e) {
+    if (e.target === document.getElementById('edit-sources-backdrop')) closeEditSources();
+  }
+
+  async function saveEditSources() {
+    if (!_editTopicId) return;
+    await TopicService.updateTopic(_editTopicId, { sources: { ..._editSources } });
+    closeEditSources();
+    // Re-render the column to reflect source changes
+    Kanban.renderColumn(_editTopicId);
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  return {
+    closeDropdown,
+    refreshTopic,
+    togglePauseTopic,
+    confirmClear,
+    confirmDelete,
+    confirmAction,
+    closeConfirm,
+    handleBackdropClick,
+    openEditSources,
+    addEditSource,
+    removeEditSource,
+    closeEditSources,
+    handleEditBackdropClick,
+    saveEditSources,
+    showRerunConfirm,
+    showConfirm,
+    _outsideClick,
+    get _activeBtn()    { return _activeBtn; },
+    set _activeBtn(v)   { _activeBtn = v; },
+    get _pendingRerun() { return _pendingRerun; },
+    set _pendingRerun(v){ _pendingRerun = v; },
+  };
+})();
+
+window.ColMenu = ColMenu;

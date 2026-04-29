@@ -447,6 +447,85 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
 </div>
 
 <!-- Scripts — order matters, NO defer (inline script depends on these being defined) -->
+<!-- ════════════════════════════════════════════
+     COLUMN CONFIRM MODAL
+     Used for Clear Subtopics and Delete Topic.
+     ════════════════════════════════════════════ -->
+<div class="confirm-modal-backdrop" id="confirm-modal-backdrop" onclick="ColMenu.handleBackdropClick(event)">
+  <div class="confirm-modal" id="confirm-modal">
+    <div class="confirm-modal-icon" id="confirm-modal-icon">
+      <svg id="confirm-modal-icon-svg" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 1L1 17h16L9 1z"/>
+        <line x1="9" y1="7" x2="9" y2="11"/>
+        <circle cx="9" cy="14" r="0.5" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="confirm-modal-title" id="confirm-modal-title">Are you sure?</div>
+    <div class="confirm-modal-body"  id="confirm-modal-body"></div>
+    <div class="confirm-modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="ColMenu.closeConfirm()">Cancel</button>
+      <button class="btn btn-sm" id="confirm-modal-action-btn" onclick="ColMenu.confirmAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     EDIT SOURCES MODAL
+     ════════════════════════════════════════════ -->
+<div class="confirm-modal-backdrop" id="edit-sources-backdrop" onclick="ColMenu.handleEditBackdropClick(event)">
+  <div class="confirm-modal edit-sources-modal" id="edit-sources-modal">
+    <div class="confirm-modal-title">Edit Sources</div>
+    <div class="confirm-modal-body" style="margin-bottom:16px" id="edit-sources-topic-name"></div>
+
+    <!-- X -->
+    <div class="edit-sources-section">
+      <div class="edit-sources-label">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        X (Twitter)
+      </div>
+      <div class="edit-source-tags" id="edit-x-tags"></div>
+      <div class="edit-source-input-row">
+        <input class="edit-source-input" id="edit-x-input" placeholder="@handle or topic keyword"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('x')}"/>
+        <button class="edit-source-add" onclick="ColMenu.addEditSource('x')">+ Add</button>
+      </div>
+    </div>
+
+    <!-- Reddit -->
+    <div class="edit-sources-section">
+      <div class="edit-sources-label">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>
+        Reddit
+      </div>
+      <div class="edit-source-tags" id="edit-reddit-tags"></div>
+      <div class="edit-source-input-row">
+        <input class="edit-source-input" id="edit-reddit-input" placeholder="r/subreddit"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('reddit')}"/>
+        <button class="edit-source-add" onclick="ColMenu.addEditSource('reddit')">+ Add</button>
+      </div>
+    </div>
+
+    <!-- Web -->
+    <div class="edit-sources-section">
+      <div class="edit-sources-label">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>
+        Websites
+      </div>
+      <div class="edit-source-tags" id="edit-web-tags"></div>
+      <div class="edit-source-input-row">
+        <input class="edit-source-input" id="edit-web-input" placeholder="reuters.com, bbc.co.uk"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('web')}"/>
+        <button class="edit-source-add" onclick="ColMenu.addEditSource('web')">+ Add</button>
+      </div>
+    </div>
+
+    <div class="confirm-modal-actions" style="margin-top:8px">
+      <button class="btn btn-ghost btn-sm" onclick="ColMenu.closeEditSources()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="ColMenu.saveEditSources()">Save sources</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/topic.service.js"></script>
@@ -514,7 +593,7 @@ function handleSearch(query) {
 /* Refresh all topics */
 async function refreshAll() {
   const topics = await TopicService.getTopics();
-  topics.forEach(t => Kanban.fetchTopicData(t.id));
+  topics.filter(t => !t.paused).forEach(t => Kanban.fetchTopicData(t.id));
 }
 
 /* Load saved user */

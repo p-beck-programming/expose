@@ -114,9 +114,177 @@
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--ink-muted);
   transition: all 0.15s;
+  position: relative; /* anchor for dropdown */
 }
 .col-menu-btn:hover { background: var(--surface3); color: var(--ink); }
+.col-menu-btn.active { background: var(--surface3); color: var(--ink); }
 .col-menu-btn svg { width: 13px; height: 13px; }
+
+/* ── Column dropdown menu ── */
+.col-dropdown {
+  position: fixed; /* fixed so it escapes overflow:hidden on the column */
+  z-index: 500;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  min-width: 192px;
+  overflow: hidden;
+  animation: dropIn 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes dropIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.col-dropdown-section {
+  padding: 6px;
+}
+.col-dropdown-section + .col-dropdown-section {
+  border-top: 1px solid var(--border-soft);
+}
+
+.col-dropdown-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 10px;
+  background: none; border: none;
+  border-radius: var(--r-md);
+  font-family: var(--font-ui); font-size: 12px; font-weight: 500;
+  color: var(--ink-2); cursor: pointer; text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.col-dropdown-item:hover { background: var(--surface2); color: var(--ink); }
+.col-dropdown-item svg { width: 14px; height: 14px; flex-shrink: 0; opacity: 0.7; }
+.col-dropdown-item:hover svg { opacity: 1; }
+
+.col-dropdown-item.item-warn { color: var(--warn); }
+.col-dropdown-item.item-warn:hover { background: var(--warn-soft); color: var(--warn); }
+.col-dropdown-item.item-warn svg { opacity: 1; }
+
+.col-dropdown-item.item-danger { color: var(--danger); }
+.col-dropdown-item.item-danger:hover { background: var(--danger-soft); color: var(--danger); }
+.col-dropdown-item.item-danger svg { opacity: 1; }
+
+.col-dropdown-item.item-paused { color: var(--accent-text); }
+.col-dropdown-item.item-paused:hover { background: var(--accent-soft); color: var(--accent-text); }
+
+.col-dropdown-label {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--ink-muted); letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 8px 10px 4px;
+}
+
+/* ── Confirm modal ── */
+.confirm-modal-backdrop {
+  position: fixed; inset: 0; z-index: 800;
+  background: rgba(10,12,16,0.5);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.confirm-modal-backdrop.open {
+  opacity: 1; pointer-events: all;
+}
+.confirm-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 28px;
+  max-width: 360px; width: 100%;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.18);
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s;
+  opacity: 0;
+}
+.confirm-modal-backdrop.open .confirm-modal {
+  transform: none; opacity: 1;
+}
+.confirm-modal-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+}
+.confirm-modal-icon.warn-icon { background: var(--warn-soft); color: var(--warn); }
+.confirm-modal-icon.danger-icon { background: var(--danger-soft); color: var(--danger); }
+.confirm-modal-icon svg { width: 18px; height: 18px; }
+.confirm-modal-title {
+  font-family: var(--font-ui); font-size: 16px; font-weight: 700;
+  color: var(--ink); margin-bottom: 8px;
+}
+.confirm-modal-body {
+  font-size: 13px; color: var(--ink-muted);
+  line-height: 1.6; margin-bottom: 22px;
+}
+.confirm-modal-body strong { color: var(--ink-2); font-weight: 600; }
+.confirm-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+
+/* ── Edit sources panel (inside confirm modal) ── */
+.edit-sources-modal { max-width: 440px; }
+.edit-sources-section { margin-bottom: 16px; }
+.edit-sources-label {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--ink-muted); letter-spacing: 0.12em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.edit-sources-label svg { width: 11px; height: 11px; }
+.edit-source-tags {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px; min-height: 24px;
+}
+.edit-source-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 3px 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-2);
+  animation: tagIn 0.18s ease both;
+}
+.edit-source-tag button {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-muted); padding: 0; line-height: 0;
+  transition: color 0.15s; display: flex; align-items: center;
+}
+.edit-source-tag button:hover { color: var(--danger); }
+.edit-source-tag button svg { width: 9px; height: 9px; }
+.edit-source-input-row {
+  display: flex; gap: 6px;
+}
+.edit-source-input {
+  flex: 1;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 7px 10px;
+  font-family: var(--font-body); font-size: 12px; color: var(--ink);
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.edit-source-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.edit-source-input::placeholder { color: var(--ink-muted); }
+.edit-source-add {
+  background: var(--surface3); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 7px 12px;
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  transition: all 0.15s;
+}
+.edit-source-add:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+
+/* paused column visual state */
+.kanban-col.paused { opacity: 0.6; }
+.kanban-col.paused .col-header { background: var(--surface2); }
+.paused-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface3); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 1px 7px;
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted);
+  letter-spacing: 0.05em;
+}
 
 /* ── Column body ── */
 .col-body {
