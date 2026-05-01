@@ -7,10 +7,9 @@
 
    Optimizations applied:
      1. Single pass — halves API call count
-     2. maxOutputTokens: 1200, thinkingConfig.thinkingBudget: 0
-      thinkingBudget:0 disables internal chain-of-thought on 2.5
-      models, saving ~2200 tokens per call. Do not set both
-      thinkingBudget and thinkingLevel — 400 error will result.
+     2. maxOutputTokens: 2600 (flash-lite needs ~2400 for 3 subtopics).
+      thinkingConfig.thinkingBudget: 0 disables chain-of-thought.
+      Do not set both thinkingBudget and thinkingLevel — 400 error.
      3. Tighter, directive prompt language
      4. Fixed at exactly 3 subtopics per refresh
      5. 6 total sources per subtopic max (hard trim)
@@ -84,7 +83,7 @@ const GeminiService = (() => {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         temperature:     1.0,  // required for grounding per Google docs
-        maxOutputTokens: 1200, // sufficient for flash-lite responses
+        maxOutputTokens: 2600, // raised from 1200 — flash-lite needs ~2400 for 3 full subtopics
         thinkingConfig:  { thinkingBudget: 0 }, // disable thinking tokens — saves ~2200 tokens/call
       },
     };
@@ -109,7 +108,13 @@ const GeminiService = (() => {
     const candidate = data.candidates?.[0];
     if (!candidate) throw new Error('No response from Gemini');
 
-    const text      = candidate.content?.parts?.map(p => p.text || '').join('') || '';
+    // Take only the first non-empty text part.
+    // Gemini sometimes emits duplicate parts with identical content — concatenating
+    // them produces doubled JSON that breaks _extractJSON. Taking the first part
+    // that contains a JSON block is the safest approach.
+    const parts    = candidate.content?.parts || [];
+    const firstJSON = parts.find(p => p.text && (p.text.includes('{') || p.text.includes('[')));
+    const text      = firstJSON?.text || parts.find(p => p.text)?.text || '';
     const grounding = candidate.groundingMetadata || {};
     return { text, grounding };
   }
