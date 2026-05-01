@@ -62,7 +62,7 @@ const GeminiService = (() => {
   const MAX_SUBTOPICS = 3;  // fixed subtopic count per refresh
   const CACHE_MINUTES = 30; // skip fetch if data is fresher than this
 
-  /* ── Get API key from settings ── */
+  /* ── Get API key ── */
   function getApiKey() {
     try {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
@@ -70,8 +70,13 @@ const GeminiService = (() => {
     } catch { return ''; }
   }
 
-  /* ── Core API call ── */
-  async function _callGemini(prompt, useSearch = true) {
+  /* ── Get settings ── */
+  function _getSettings() {
+    try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; }
+  }
+
+  /* ── Core Gemini call ── */
+  async function _callGemini(prompt, useSearch) {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('NO_API_KEY');
 
@@ -83,10 +88,7 @@ const GeminiService = (() => {
         thinkingConfig:  { thinkingBudget: 0 }, // disable thinking tokens — saves ~2200 tokens/call
       },
     };
-
-    if (useSearch) {
-      body.tools = [{ google_search: {} }];
-    }
+    if (useSearch) body.tools = [{ google_search: {} }];
 
     const res = await fetch(`${API_URL}?key=${apiKey}`, {
       method:  'POST',
@@ -97,212 +99,270 @@ const GeminiService = (() => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       const msg = err?.error?.message || `HTTP ${res.status}`;
-      // Surface quota errors clearly
       if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
       if (res.status === 400) throw new Error(`BAD_REQUEST: ${msg}`);
       if (res.status === 403) throw new Error('INVALID_API_KEY');
       throw new Error(msg);
     }
 
-    const data = await res.json();
+    const data      = await res.json();
     const candidate = data.candidates?.[0];
     if (!candidate) throw new Error('No response from Gemini');
 
-    const text     = candidate.content?.parts?.map(p => p.text || '').join('') || '';
+    const text      = candidate.content?.parts?.map(p => p.text || '').join('') || '';
     const grounding = candidate.groundingMetadata || {};
+    return { text, grounding };
+  }
 
-    return { text, grounding, candidate };
+  /* ── Match grounding chunk URLs to source objects ────────────
+     Compares source domain names against grounding chunk titles.
+     When a match is found, attaches the redirect URL to the
+     source object. Displayed as clean domain label + redirect href.
+
+     OPTION 2 NOTE (future upgrade):
+     Replace the redirect URL with a resolved permanent URL by
+     calling a proxy endpoint: GET /api/resolve?url=<redirect>
+     The proxy follows the redirect server-side and returns the
+     final article URL. Requires one serverless function
+     (Cloudflare Worker / Netlify Function). No Gemini tokens used.
+  ─────────────────────────────────────────────────────────────── */
+  function _matchGroundingUrls(subtopics, groundingChunks) {
+    if (!groundingChunks?.length) return subtopics;
+
+    // Build a lookup: normalised domain → redirect URL
+    const chunkMap = {};
+    groundingChunks.forEach(chunk => {
+      if (!chunk.web?.uri) return;
+      const title = (chunk.web.title || '').toLowerCase().replace(/^www\./, '');
+      const uri   = chunk.web.uri;
+      if (title) chunkMap[title] = uri;
+    });
+
+    function normaliseDomain(s) {
+      return (s || '').toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/.*$/, '')
+        .trim();
+    }
+
+    return subtopics.map(sub => {
+      const updatedSources = {};
+      ['x', 'reddit', 'web'].forEach(type => {
+        updatedSources[type] = (sub.sources?.[type] || []).map(article => {
+          if (article.url) return article; // already has a URL, keep it
+          const domain = normaliseDomain(article.source);
+          // Try exact match first, then partial match
+          const matchedUrl = chunkMap[domain]
+            || Object.entries(chunkMap).find(([k]) => k.includes(domain) || domain.includes(k))?.[1]
+            || '';
+          return { ...article, url: matchedUrl };
+        });
+      });
+      return { ...sub, sources: updatedSources };
+    });
   }
 
   /* ── Strip markdown fences and parse JSON ── */
   function _extractJSON(text) {
-    // Try fenced block first
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) {
-      try { return JSON.parse(fenced[1].trim()); } catch {}
-    }
-    // Try raw JSON object
-    const raw = text.match(/(\{[\s\S]*\})/);
-    if (raw) {
-      try { return JSON.parse(raw[1]); } catch {}
-    }
-    // Try whole string
+    if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch {} }
+    const raw = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (raw)   { try { return JSON.parse(raw[1]); } catch {} }
     try { return JSON.parse(text.trim()); } catch {}
     return null;
   }
 
-  /* ── Build source-scoped search query ── */
-  function _buildSearchQuery(topicName, sources, expandTopics) {
-    const parts = [topicName];
+  /* ── Source rotation ──────────────────────────
+     Distributes MAX_SOURCES slots across source
+     types based on user config. Uses offset to
+     rotate the window each refresh so all sources
+     get coverage over time.
 
-    // Add site: operators for web sources
-    if (sources.web?.length) {
-      const sites = sources.web.slice(0, 3).map(s => `site:${s}`).join(' OR ');
-      parts.push(`(${sites})`);
+     Example: 4 web + 2 reddit + 1 X = 7 total.
+     MAX_SOURCES = 6, so one is skipped per refresh.
+     Offset increments each call, rotating which
+     source is excluded. After 7 refreshes, all
+     sources have been included.
+  ─────────────────────────────────────────────── */
+  function _getRotatedSources(sources, offset) {
+    const x      = sources.x      || [];
+    const reddit = sources.reddit || [];
+    const web    = sources.web    || [];
+    const total  = x.length + reddit.length + web.length;
+
+    // No rotation needed if within budget
+    if (total <= MAX_SOURCES) return { x, reddit, web };
+
+    // Flat ordered list of all sources
+    const all = [
+      ...x.map(v      => ({ type: 'x',      value: v })),
+      ...reddit.map(v => ({ type: 'reddit', value: v })),
+      ...web.map(v    => ({ type: 'web',    value: v })),
+    ];
+
+    // Rotating window
+    const start  = offset % total;
+    const window = [];
+    for (let i = 0; i < MAX_SOURCES; i++) {
+      window.push(all[(start + i) % total]);
     }
 
-    // Add Reddit scope
-    if (sources.reddit?.length) {
-      const subs = sources.reddit.slice(0, 3).map(s => `site:reddit.com ${s}`).join(' OR ');
-      parts.push(`(${subs})`);
-    }
-
-    // Add X scope (Google-indexed tweets)
-    if (sources.x?.length) {
-      const xTerms = sources.x.slice(0, 3).map(s =>
-        s.startsWith('@') ? `site:x.com ${s.slice(1)}` : `site:x.com "${s}"`
-      ).join(' OR ');
-      parts.push(`(${xTerms})`);
-    }
-
-    // If expandTopics is on, tell Gemini to broaden
-    const expand = expandTopics !== false;
-    const expandNote = expand
-      ? 'Also search for related angles, synonyms, and emerging subtopics.'
-      : 'Search only for the exact topic as stated.';
-
-    return { query: parts.join(' '), expandNote };
+    return {
+      x:      window.filter(s => s.type === 'x').map(s => s.value),
+      reddit: window.filter(s => s.type === 'reddit').map(s => s.value),
+      web:    window.filter(s => s.type === 'web').map(s => s.value),
+    };
   }
 
-  /* ════════════════════════════════
+  /* ── Build terse search scope string ── */
+  function _buildScope(rotated, expandTopics) {
+    const parts = [];
+    if (rotated.web.length)    parts.push(rotated.web.map(s => `site:${s}`).join(' OR '));
+    if (rotated.reddit.length) parts.push(rotated.reddit.map(s => `site:reddit.com ${s}`).join(' OR '));
+    if (rotated.x.length)      parts.push(rotated.x.map(s =>
+      s.startsWith('@') ? `site:x.com ${s.slice(1)}` : `site:x.com "${s}"`
+    ).join(' OR '));
+    const scope  = parts.length ? parts.join(' OR ') : 'any relevant source';
+    const expand = expandTopics ? ' Include related angles and emerging subtopics.' : '';
+    return scope + expand;
+  }
+
+  /* ── Hard trim sources after parsing ─────────
+     Enforces MAX_SOURCES cap regardless of what
+     Gemini returned. Distributes evenly across
+     types with any remainder going to web.
+  ─────────────────────────────────────────────── */
+  function _trimSources(subtopic) {
+    const s        = subtopic.sources || { x: [], reddit: [], web: [] };
+    const perType  = Math.floor(MAX_SOURCES / 3); // 2 each
+    const remainder = MAX_SOURCES - (perType * 3); // leftover to web
+    return {
+      ...subtopic,
+      sources: {
+        x:      (s.x      || []).slice(0, perType),
+        reddit: (s.reddit || []).slice(0, perType),
+        web:    (s.web    || []).slice(0, perType + remainder),
+      },
+    };
+  }
+
+  /* ════════════════════════════════════════════
      MAIN EXPORT: fetchSubtopics
-     Called by kanban.js for each topic refresh.
-  ════════════════════════════════ */
+     Called by kanban.js on each topic refresh.
+  ════════════════════════════════════════════ */
   async function fetchSubtopics(topic) {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+    if (!getApiKey()) {
       return {
         success: false,
         error:   'NO_API_KEY',
-        message: 'Add your Gemini API key in Settings to enable live data.',
+        message: 'Add your Gemini API key in Settings → Intelligence.',
       };
     }
 
-    const settings    = (() => { try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; } })();
+    /* ── 30-minute cache guard ── */
+    const lastUpdated = topic.updatedAt ? new Date(topic.updatedAt).getTime() : 0;
+    const ageMinutes  = (Date.now() - lastUpdated) / 60000;
+    if (ageMinutes < CACHE_MINUTES && (topic.subtopics || []).length > 0) {
+      return { success: true, subtopics: topic.subtopics, fromCache: true };
+    }
+
+    /* ── Rotate sources, increment offset ── */
+    const offset         = topic.sourceRotationOffset || 0;
+    const rotatedSources = _getRotatedSources(topic.sources || {}, offset);
+
+    // Persist incremented offset — fire and forget
+    TopicService.updateTopic(topic.id, { sourceRotationOffset: offset + 1 });
+
+    const settings    = _getSettings();
     const expandTopics = settings.expandTopics !== false;
-    const { query, expandNote } = _buildSearchQuery(topic.name, topic.sources, expandTopics);
+    const scope        = _buildScope(rotatedSources, expandTopics);
 
-    /* ── PASS 1: Search grounding — fetch real source data ── */
-    const pass1Prompt = `
-You are an OSINT analyst. Search the web right now for recent news and content about: "${topic.name}"
+    /* ── Single-pass prompt ── */
+    const prompt =
+`OSINT task. Search for recent news about: "${topic.name}"
+Scope: ${scope}
+Find content from last 72h. Identify exactly ${MAX_SUBTOPICS} distinct subtopics from what you find.
+Subtopics must emerge from real source data — not invented. Each is a genuine angle or development.
+Return ONLY valid JSON, no other text:
+{"subtopics":[{"id":"s1","name":"max 8 word title","summary":"1-2 sentence summary of what sources say","score":85,"sourceCount":4,"sources":{"x":[{"title":"headline","source":"@handle","url":""}],"reddit":[{"title":"thread","source":"r/sub","url":""}],"web":[{"title":"headline","source":"domain.com","url":"https://..."}]},"broadSources":[]}],"searchQueries":["query used"]}`;
 
-Search scope: ${query}
-${expandNote}
-
-Find 8-15 recent articles, posts, or sources published in the last 72 hours if possible.
-Read the content carefully. Do not summarize yet — just collect what you find.
-List what each source is saying about "${topic.name}".
-`.trim();
-
-    let pass1Result;
+    let result;
     try {
-      pass1Result = await _callGemini(pass1Prompt, true);
+      result = await _callGemini(prompt, true);
     } catch (err) {
       return { success: false, error: err.message, message: _friendlyError(err.message) };
     }
 
-    // Short circuit if grounding returned nothing useful
-    if (!pass1Result.text || pass1Result.text.length < 100) {
+    if (!result.text || result.text.length < 50) {
       return {
         success: false,
         error:   'EMPTY_RESPONSE',
-        message: 'Gemini returned no results. Try again or check your API key quota.',
+        message: 'Gemini returned no results — try again.',
       };
     }
 
-    /* ── PASS 2: Subtopic extraction — read inflow, identify subtopics ── */
-    const pass2Prompt = `
-You are an OSINT analyst. Below is raw source data collected about the topic "${topic.name}".
-Read it carefully and identify 2-5 distinct SUBTOPICS that are actually emerging from this data.
-
-IMPORTANT RULES:
-- Subtopics must come FROM the data, not invented by you
-- Each subtopic must be a real angle or development found in the sources
-- Do not generate subtopics and then search for them — only surface what is in the data below
-
-RAW SOURCE DATA:
-${pass1Result.text}
-
-Return ONLY a valid JSON object. No markdown, no explanation, no text outside the JSON.
-Use this exact structure:
-
-{
-  "subtopics": [
-    {
-      "id": "unique_short_id",
-      "name": "Short subtopic title (max 8 words)",
-      "summary": "1-2 sentences describing what sources are actually saying about this subtopic.",
-      "score": <integer 0-100 based on how many sources cover it and how significant>,
-      "sourceCount": <integer, number of distinct sources mentioning this subtopic>,
-      "sources": {
-        "x":      [{ "title": "post or headline", "source": "@handle or X", "url": "" }],
-        "reddit": [{ "title": "thread title", "source": "r/subreddit", "url": "" }],
-        "web":    [{ "title": "article headline", "source": "domain.com", "url": "full url if available" }]
-      },
-      "broadSources": []
-    }
-  ],
-  "searchQueries": ["list", "of", "queries", "used"]
-}
-`.trim();
-
-    let pass2Result;
-    try {
-      pass2Result = await _callGemini(pass2Prompt, false); // no search on pass 2
-    } catch (err) {
-      return { success: false, error: err.message, message: _friendlyError(err.message) };
-    }
-
-    const parsed = _extractJSON(pass2Result.text);
+    const parsed = _extractJSON(result.text);
     if (!parsed?.subtopics?.length) {
       return {
         success: false,
         error:   'PARSE_ERROR',
-        message: 'Could not parse subtopics from Gemini response. Try again.',
+        message: 'Could not parse Gemini response. Try refreshing.',
       };
     }
 
-    /* ── If allSourcesEnabled, run a broad search too ── */
-    let broadResults = [];
+    // Sort, cap at MAX_SUBTOPICS, hard trim sources, match grounding URLs
+    const groundingChunks = result.grounding?.groundingChunks || [];
+    const subtopics = parsed.subtopics
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, MAX_SUBTOPICS)
+      .map(_trimSources);
+
+    // Attach redirect URLs from grounding chunks to source objects
+    const linkedSubtopics = _matchGroundingUrls(subtopics, groundingChunks);
+
+    // Store grounding chunks on each subtopic so the fullscreen overlay
+    // can render a verified sources panel as a fallback
+    linkedSubtopics.forEach(sub => {
+      sub.groundingChunks = groundingChunks;
+    });
+
+    /* ── Optional broad search (separate call) ── */
     if (topic.allSourcesEnabled) {
       try {
-        const broadPrompt = `
-Search the open web for the latest news about: "${topic.name}"
-Find 4-6 sources from any website. Return a JSON array of objects:
-[{ "title": "headline", "source": "domain.com", "url": "url if available" }]
-Return ONLY the JSON array, no other text.
-`.trim();
+        const broadPrompt =
+`Search for latest news: "${topic.name}". Return ONLY a JSON array, no other text:
+[{"title":"headline","source":"domain.com","url":"https://..."}]
+Max 4 results.`;
         const broadResult = await _callGemini(broadPrompt, true);
         const broadParsed = _extractJSON(broadResult.text);
-        if (Array.isArray(broadParsed)) broadResults = broadParsed;
-      } catch { /* broad search failure is non-fatal */ }
+        if (Array.isArray(broadParsed) && linkedSubtopics[0]) {
+          // Match grounding chunks from the broad search call too
+          const broadChunks = broadResult.grounding?.groundingChunks || [];
+          const matchedBroad = _matchGroundingUrls(
+            [{ sources: { web: broadParsed.slice(0, 4) } }],
+            broadChunks
+          );
+          linkedSubtopics[0].broadSources = matchedBroad[0]?.sources?.web || broadParsed.slice(0, 4);
+        }
+      } catch { /* non-fatal */ }
     }
 
-    // Attach broad results to the first subtopic (highest score)
-    const sorted = [...parsed.subtopics].sort((a, b) => (b.score || 0) - (a.score || 0));
-    if (broadResults.length && sorted[0]) {
-      sorted[0].broadSources = broadResults;
-    }
-
-    // Pull Google Search suggestion HTML if present (display requirement)
-    const searchSuggestionHTML = pass1Result.grounding?.searchEntryPoint?.renderedContent || null;
-
-    // Log to search log
-    const queries = parsed.searchQueries || [topic.name];
+    // Log search queries (cap at 3 per refresh)
+    const queries = (parsed.searchQueries || [topic.name]).slice(0, 3);
     for (const q of queries) {
       await TopicService.appendLog({
         query:        q,
         topicId:      topic.id,
         topicName:    topic.name,
-        resultsCount: sorted.length,
+        resultsCount: linkedSubtopics.length,
       });
     }
 
     return {
-      success:             true,
-      subtopics:           sorted,
-      searchSuggestionHTML, // store on topic for display in full-screen overlay
-      groundingChunks:     pass1Result.grounding?.groundingChunks || [],
+      success:   true,
+      subtopics: linkedSubtopics,
+      fromCache: false,
     };
   }
 
@@ -310,10 +370,10 @@ Return ONLY the JSON array, no other text.
   function _friendlyError(code) {
     const map = {
       NO_API_KEY:     'Add your Gemini API key in Settings → Intelligence.',
-      QUOTA_EXCEEDED: 'Daily API quota reached. Wait until tomorrow or check your usage at aistudio.google.com.',
-      INVALID_API_KEY:'API key rejected. Check it is correct in Settings → Intelligence.',
-      EMPTY_RESPONSE: 'Gemini returned empty results. This is a known intermittent issue — try again.',
-      PARSE_ERROR:    'Could not parse Gemini response. Try refreshing the topic.',
+      QUOTA_EXCEEDED: 'Daily quota reached. Check usage at aistudio.google.com.',
+      INVALID_API_KEY:'API key rejected. Check Settings → Intelligence.',
+      EMPTY_RESPONSE: 'Gemini returned no results — try again.',
+      PARSE_ERROR:    'Could not parse response. Try refreshing.',
     };
     return map[code] || `Gemini error: ${code}`;
   }

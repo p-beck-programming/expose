@@ -375,8 +375,17 @@ const Kanban = (() => {
           ${items.map(a => `
             <div class="expanded-article">
               <div class="expanded-article-dot"></div>
-              <div>
-                <div class="expanded-article-title">${esc(a.title)}</div>
+              <div style="flex:1;min-width:0">
+                <div class="expanded-article-title">
+                  ${a.url
+                    ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" class="source-link">
+                        ${esc(a.title)}
+                        <svg class="external-icon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M4 2H2v6h6V6M6 2h2v2M8 2L5 5"/>
+                        </svg>
+                       </a>`
+                    : esc(a.title)}
+                </div>
                 <div class="expanded-article-source">${esc(a.source)}</div>
               </div>
             </div>`).join('')}
@@ -409,9 +418,55 @@ const Kanban = (() => {
       </div>`;
   }
 
-  /* ════════════════════════════════
-     BUILD TOMBSTONE
-  ════════════════════════════════ */
+  /* ── Verified sources panel ─────────────────────────
+     Shows raw grounding chunks as a collapsible panel.
+     These are the actual sources Gemini searched,
+     each with a redirect URL (via Google's redirect server).
+     Label is clean domain name; href is the redirect URL.
+
+     OPTION 2 UPGRADE NOTE:
+     Replace redirect URLs with permanent article URLs by
+     calling GET /api/resolve?url=<redirect> (a serverless
+     proxy that follows the redirect server-side).
+     Cache resolved URLs in the subtopic object in localStorage
+     so each URL is only resolved once per session.
+  ──────────────────────────────────────────────────── */
+  function buildFullscreenGroundingPanel(sub) {
+    const chunks = sub.groundingChunks || [];
+    if (!chunks.length) return '';
+    return `
+      <div class="fullscreen-section-title" style="margin-top:28px">
+        <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <polyline points="2,5.5 4.5,8 9,3"/>
+        </svg>
+        Verified sources
+        <span class="grounding-note">via Google Search grounding</span>
+      </div>
+      <div class="grounding-panel">
+        ${chunks.map(chunk => {
+          const uri   = chunk.web?.uri   || '';
+          const title = chunk.web?.title || '';
+          if (!uri) return '';
+          const domain = title || _extractDomain(uri);
+          return `
+            <a class="grounding-chip" href="${esc(uri)}" target="_blank" rel="noopener">
+              ${esc(domain)}
+              <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 2H2v6h6V6M6 2h2v2M8 2L5 5"/>
+              </svg>
+            </a>`;
+        }).join('')}
+      </div>`;
+  }
+
+  /* ── Extract readable domain from a URL ── */
+  function _extractDomain(url) {
+    try {
+      // For redirect URLs show "via Google" since the real domain isn't readable
+      if (url.includes('vertexaisearch.cloud.google.com')) return 'via Google';
+      return new URL(url).hostname.replace(/^www\./, '');
+    } catch { return url; }
+  }
   function buildTombstone(sub, topicId) {
     const t = el('div', 'tombstone');
     t.id = `tomb-${sub.id}`;
@@ -651,7 +706,8 @@ const Kanban = (() => {
         </div>
       </div>
       ${buildFullscreenSources(sub)}
-      ${sub.broadSources?.length > 0 ? buildFullscreenBroad(sub) : ''}`;
+      ${sub.broadSources?.length > 0 ? buildFullscreenBroad(sub) : ''}
+      ${buildFullscreenGroundingPanel(sub)}`;
 
     document.getElementById('fullscreen-title').textContent = sub.name;
     overlay.classList.add('open');
@@ -680,8 +736,16 @@ const Kanban = (() => {
             <div class="fullscreen-article-body">
               <div class="fullscreen-article-source">${esc(a.source)}</div>
               <div class="fullscreen-article-title">
-                ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title)}
+                ${a.url
+                  ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" class="source-link">
+                      ${esc(a.title)}
+                      <svg class="external-icon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 2H2v6h6V6M6 2h2v2M8 2L5 5"/>
+                      </svg>
+                     </a>`
+                  : esc(a.title)}
               </div>
+              ${a.url ? `<div class="source-link-domain">${_extractDomain(a.url)}</div>` : ''}
             </div>
           </div>`).join('')}`;
     }).join('');
@@ -696,8 +760,16 @@ const Kanban = (() => {
           <div class="fullscreen-article-body">
             <div class="fullscreen-article-source">${esc(a.source)}</div>
             <div class="fullscreen-article-title">
-              ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title)}
+              ${a.url
+                ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" class="source-link">
+                    ${esc(a.title)}
+                    <svg class="external-icon" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 2H2v6h6V6M6 2h2v2M8 2L5 5"/>
+                    </svg>
+                   </a>`
+                : esc(a.title)}
             </div>
+            ${a.url ? `<div class="source-link-domain">${_extractDomain(a.url)}</div>` : ''}
           </div>
         </div>`).join('')}`;
   }
