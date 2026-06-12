@@ -31,7 +31,6 @@ const Overlay = (() => {
 
   // Sources per type: { x: [], reddit: [], web: [] }
   let sources = { x: [], reddit: [], web: [] };
-  let xMode = 'topic'; // 'topic' | 'handle'
   let allSourcesEnabled = false;
 
   /* ── DOM refs (resolved at open time) ── */
@@ -67,13 +66,12 @@ const Overlay = (() => {
   function reset() {
     currentStep = 1;
     sources = { x: [], reddit: [], web: [] };
-    xMode = 'topic';
     allSourcesEnabled = false;
 
     // Clear inputs
     const nameInput = $('topic-name-input');
     if (nameInput) { nameInput.value = ''; nameInput.classList.remove('error'); }
-    ['x-source-input', 'reddit-input', 'web-input'].forEach(id => {
+    ['reddit-input', 'web-input'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
     // Reset toggle
@@ -85,8 +83,6 @@ const Overlay = (() => {
 
     // Collapse all source sections
     document.querySelectorAll('.source-section').forEach(s => s.classList.remove('expanded'));
-    // Reset X mode
-    setXMode('topic');
     renderTags();
     updateStep();
   }
@@ -188,42 +184,18 @@ const Overlay = (() => {
   }
 
   /* ── Source management ── */
-  function setXMode(mode) {
-    xMode = mode;
-    const topicBtn  = $('x-mode-topic');
-    const handleBtn = $('x-mode-handle');
-    const prefix    = $('x-prefix');
-    const input     = $('x-source-input');
-    const placeholder = $('x-placeholder');
-
-    if (topicBtn)  topicBtn.classList.toggle('active',  mode === 'topic');
-    if (handleBtn) handleBtn.classList.toggle('active', mode === 'handle');
-
-    if (prefix) prefix.style.display = mode === 'handle' ? 'flex' : 'none';
-    if (input) {
-      input.classList.toggle('has-prefix', mode === 'handle');
-      input.placeholder = mode === 'handle' ? 'username' : 'e.g. AI regulation, GPT';
-    }
-    if (input) input.value = '';
-  }
-
   function addSource(type) {
     let value = '';
-    if (type === 'x') {
-      const raw = $('x-source-input')?.value?.trim();
-      if (!raw) return;
-      value = xMode === 'handle'
-        ? '@' + raw.replace(/^@/, '')
-        : raw;
-      if ($('x-source-input')) $('x-source-input').value = '';
-    } else if (type === 'reddit') {
+    if (type === 'reddit') {
       const raw = $('reddit-input')?.value?.trim().replace(/^r\//, '');
       if (!raw) return;
       value = 'r/' + raw;
       if ($('reddit-input')) $('reddit-input').value = '';
     } else if (type === 'web') {
+      // Accept anything: full URLs (https://…), bare domains, with or without paths.
       const raw = $('web-input')?.value?.trim()
-        .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        .replace(/^https?:\/\//i, '').replace(/^www\./, '')
+        .split(/[?#]/)[0].replace(/\/+$/, '');
       if (!raw) return;
       value = raw;
       if ($('web-input')) $('web-input').value = '';
@@ -307,7 +279,7 @@ const Overlay = (() => {
   }
 
   /* ── Public API ── */
-  return { open, close, goToStep2, submit, addSource, removeSource, setXMode, toggleSection, toggleAllSources, setSuggestion, updateCharCount };
+  return { open, close, goToStep2, submit, addSource, removeSource, toggleSection, toggleAllSources, setSuggestion, updateCharCount };
 })();
 
 /* Expose globally for inline onclick handlers */

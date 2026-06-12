@@ -5,32 +5,54 @@
    ═══════════════════════════════════════════════ */
 
 const Theme = (() => {
+  const PALETTES = [
+    { id: 'console',    label: 'Console'    },
+    { id: 'phosphor',   label: 'Phosphor'   },
+    { id: 'coldwave',   label: 'Coldwave'   },
+    { id: 'klaxon',     label: 'Klaxon'     },
+    { id: 'nightshift', label: 'Nightshift' },
+    { id: 'daybreak',   label: 'Daybreak'   },
+  ];
+  const DEFAULT = 'console';
+
   function get() {
     try {
-      const s = JSON.parse(localStorage.getItem('expose_settings_v1'));
-      return s?.theme || 'light';
-    } catch { return 'light'; }
+      const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+      if (s.palette && PALETTES.some(p => p.id === s.palette)) return s.palette;
+      if (s.theme === 'light') return 'daybreak'; // legacy migration
+      return DEFAULT;
+    } catch { return DEFAULT; }
   }
 
-  function apply(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
+  function apply(palette) {
+    const id = PALETTES.some(p => p.id === palette) ? palette : DEFAULT;
+    document.documentElement.setAttribute('data-palette', id);
+    // Legacy hook: pages not yet migrated still read data-theme
+    document.documentElement.setAttribute('data-theme', id === 'daybreak' ? 'light' : 'dark');
+    const sel = document.getElementById('palette-select');
+    if (sel && sel.value !== id) sel.value = id;
   }
 
-  function toggle() {
-    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    apply(next);
-    // Persist without clobbering other settings
+  function set(palette) {
+    apply(palette);
     try {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
-      s.theme = next;
+      s.palette = palette;
       localStorage.setItem('expose_settings_v1', JSON.stringify(s));
     } catch {}
-    return next;
+    return palette;
   }
 
+  /* Legacy: old theme button cycled light/dark; now cycles palettes */
+  function toggle() {
+    const order = PALETTES.map(p => p.id);
+    return set(order[(order.indexOf(get()) + 1) % order.length]);
+  }
+
+  function list() { return PALETTES.slice(); }
   function init() { apply(get()); }
 
-  return { get, apply, toggle, init };
+  return { get, apply, set, toggle, list, init };
 })();
 
 window.Theme = Theme;

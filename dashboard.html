@@ -1,158 +1,20 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Exposé — Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-<style>
-/* ════════════════════════════════════════════════
-   variables.css — will be extracted to its own file
-   ════════════════════════════════════════════════ */
-:root {
-  --bg:           #EDEAE2;
-  --surface:      #F8F6F1;
-  --surface2:     #F0EDE5;
-  --surface3:     #E5E1D7;
-  --ink:          #0F1117;
-  --ink-2:        #363B45;
-  --ink-muted:    #8A8F9A;
-  --accent:       #1A4FD6;
-  --accent-soft:  #EBF0FD;
-  --accent-text:  #1340B8;
-  --border:       #DDD8CD;
-  --border-soft:  #E8E4DA;
-  --danger:       #C0392B;
-  --danger-soft:  #FDECEA;
-  --warn:         #B45309;
-  --success:      #1A7A4A;
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:  0 4px 16px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --font-ui:    'Syne', sans-serif;
-  --font-body:  'Manrope', sans-serif;
-  --font-mono:  'DM Mono', monospace;
-  --sidebar-w:  232px;
-  --topbar-h:   58px;
-  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-pill: 999px;
-}
-[data-theme="dark"] {
-  --bg:           #0C0E12;
-  --surface:      #12151B;
-  --surface2:     #181C24;
-  --surface3:     #1E222C;
-  --ink:          #E8E4D8;
-  --ink-2:        #A8A49A;
-  --ink-muted:    #565C6A;
-  --accent:       #4B7BF5;
-  --accent-soft:  #0D1830;
-  --accent-text:  #7BA3FF;
-  --border:       #222730;
-  --border-soft:  #1A1E26;
-  --danger:       #F87171;
-  --danger-soft:  #220C0C;
-  --warn:         #F59E0B;
-  --success:      #34D374;
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md:  0 4px 16px rgba(0,0,0,0.5);
-}
-
-/* ════════════════════════════════════════════════
-   base.css
-   ════════════════════════════════════════════════ */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; font-family: var(--font-body); background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.5; overflow: hidden; transition: background 0.2s, color 0.2s; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-@keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
-
-/* ════════════════════════════════════════════════
-   nav.css — sidebar + topbar
-   ════════════════════════════════════════════════ */
-.layout { display: flex; height: 100vh; overflow: hidden; }
-
-/* Sidebar */
-.sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; flex-shrink: 0; transition: background 0.2s, border-color 0.2s; }
-.sidebar-brand { padding: 18px 16px 16px; border-bottom: 1px solid var(--border-soft); }
-.brand-row { display: flex; align-items: center; gap: 10px; }
-.brand-mark { width: 32px; height: 32px; background: var(--ink); border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
-.brand-mark svg { width: 17px; height: 17px; }
-.brand-name { font-family: var(--font-ui); font-size: 14px; font-weight: 700; letter-spacing: 0.05em; color: var(--ink); line-height: 1.1; }
-.brand-sub { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.1em; margin-top: 2px; }
-
-.nav-section { padding: 12px 10px 0; }
-.nav-label { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.14em; text-transform: uppercase; padding: 0 8px 6px; }
-.nav-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: var(--r-pill); background: none; border: none; color: var(--ink-2); font-family: var(--font-ui); font-size: 13px; font-weight: 500; cursor: pointer; text-align: left; margin-bottom: 2px; transition: background 0.15s, color 0.15s; }
-.nav-item:hover { background: var(--surface2); color: var(--ink); }
-.nav-item.active { background: var(--accent-soft); color: var(--accent-text); }
-.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.65; }
-.nav-item.active svg { opacity: 1; }
-
-/* Search log */
-.search-log { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 10px; margin-top: 10px; }
-.log-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px; }
-.log-title { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); letter-spacing: 0.14em; text-transform: uppercase; }
-.log-list { flex: 1; overflow-y: auto; }
-.log-list::-webkit-scrollbar { width: 3px; }
-.log-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.log-empty { padding: 20px 8px; text-align: center; }
-.log-empty-ring { width: 36px; height: 36px; border: 1.5px dashed var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; color: var(--ink-muted); }
-.log-empty-ring svg { width: 14px; height: 14px; }
-.log-empty-text { font-size: 11px; color: var(--ink-muted); line-height: 1.6; }
-.log-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: var(--r-sm); cursor: pointer; margin-bottom: 1px; transition: background 0.15s; }
-.log-item:hover { background: var(--surface2); }
-.log-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
-.log-content { flex: 1; min-width: 0; }
-.log-query { font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.log-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); margin-top: 1px; }
-
-/* Sidebar footer */
-.sidebar-footer { padding: 12px 14px; border-top: 1px solid var(--border-soft); display: flex; align-items: center; gap: 8px; }
-.user-pill { flex: 1; display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; background: var(--surface2); border: 1px solid var(--border-soft); border-radius: var(--r-pill); cursor: pointer; min-width: 0; transition: border-color 0.15s; }
-.user-pill:hover { border-color: var(--border); }
-.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--ink); display: flex; align-items: center; justify-content: center; font-family: var(--font-ui); font-size: 10px; font-weight: 700; color: var(--surface); flex-shrink: 0; transition: background 0.2s; }
-.user-email { font-family: var(--font-ui); font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.theme-btn { width: 32px; height: 32px; border-radius: var(--r-pill); background: var(--surface2); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); flex-shrink: 0; transition: all 0.15s; }
-.theme-btn:hover { border-color: var(--border); color: var(--ink); }
-.theme-btn svg { width: 14px; height: 14px; }
-.icon-sun { display: block; }
-.icon-moon { display: none; }
-[data-theme="dark"] .icon-sun { display: none; }
-[data-theme="dark"] .icon-moon { display: block; }
-
-/* Topbar */
-.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-.topbar { height: var(--topbar-h); background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 0 20px; flex-shrink: 0; transition: background 0.2s, border-color 0.2s; }
-.add-topic-btn { display: flex; align-items: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: var(--r-pill); padding: 9px 18px; font-family: var(--font-ui); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.02em; box-shadow: 0 2px 10px rgba(26,79,214,0.28); transition: opacity 0.15s, transform 0.1s; }
-.add-topic-btn:hover { opacity: 0.9; transform: translateY(-1px); }
-.add-topic-btn svg { width: 12px; height: 12px; }
-.search-wrap { flex: 1; position: relative; max-width: 460px; }
-.search-ico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
-.search-ico svg { width: 13px; height: 13px; display: block; }
-.search-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 8px 16px 8px 36px; font-family: var(--font-body); font-size: 12px; color: var(--ink); outline: none; transition: border-color 0.15s, background 0.15s; }
-.search-input::placeholder { color: var(--ink-muted); }
-.search-input:focus { border-color: var(--accent); background: var(--surface); }
-.topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.icon-btn { width: 32px; height: 32px; border-radius: var(--r-pill); background: var(--surface2); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); transition: all 0.15s; }
-.icon-btn:hover { border-color: var(--border); color: var(--ink); }
-.icon-btn svg { width: 14px; height: 14px; }
-
-/* Content area */
-.content { flex: 1; overflow: hidden; padding: 20px; display: flex; flex-direction: column; }
-
-/* Empty state */
-.empty-zone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; animation: fadeUp 0.35s ease both; }
-.empty-icon-wrap { width: 68px; height: 68px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
-.empty-icon-wrap svg { width: 28px; height: 28px; color: var(--ink-muted); }
-.empty-title { font-family: var(--font-ui); font-size: 18px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
-.empty-sub { font-size: 13px; color: var(--ink-muted); max-width: 290px; line-height: 1.65; margin-bottom: 26px; }
-.empty-cta { display: inline-flex; align-items: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: var(--r-pill); padding: 11px 24px; font-family: var(--font-ui); font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 0.02em; box-shadow: 0 2px 14px rgba(26,79,214,0.3); transition: opacity 0.15s, transform 0.1s; }
-.empty-cta:hover { opacity: 0.9; transform: translateY(-1px); }
-.empty-cta svg { width: 13px; height: 13px; }
-.tip-row { margin-top: 18px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-muted); }
-.tip-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 3px 9px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); }
-</style>
-
-<!-- Kanban + overlay styles -->
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script>
+/* Apply the saved palette before first paint to avoid a flash */
+try {
+  var _s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+  var _p = _s.palette || (_s.theme === 'light' ? 'daybreak' : 'console');
+  document.documentElement.setAttribute('data-palette', _p);
+  document.documentElement.setAttribute('data-theme', _p === 'daybreak' ? 'light' : 'dark');
+} catch (e) {}
+</script>
+<link rel="stylesheet" href="css/theme.css"/>
 <link rel="stylesheet" href="css/kanban.css"/>
 <link rel="stylesheet" href="css/overlay.css"/>
 </head>
@@ -165,7 +27,7 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
     <div class="sidebar-brand">
       <div class="brand-row">
         <div class="brand-mark">
-          <svg viewBox="0 0 17 17" fill="none" stroke="#F8F6F1" stroke-width="1.5" stroke-linecap="round">
+          <svg viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <circle cx="8.5" cy="8.5" r="6.5"/>
             <circle cx="8.5" cy="8.5" r="2.5"/>
             <line x1="8.5" y1="2"  x2="8.5" y2="6"/>
@@ -176,7 +38,7 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
         </div>
         <div>
           <div class="brand-name">EXPOSÉ</div>
-          <div class="brand-sub">OSINT MONITOR</div>
+          <div class="brand-sub">SIGNALS MONITOR</div>
         </div>
       </div>
     </div>
@@ -190,6 +52,12 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
         </svg>
         Dashboard
       </button>
+      <button class="nav-item" onclick="window.location.href='library.html'">
+        <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 2h3.5v11H2zM6.5 2H10v11H6.5z"/><path d="M10.6 2.7l3 .8-2.8 10.6-3-.8z"/>
+        </svg>
+        Library
+      </button>
       <button class="nav-item" onclick="window.location.href='settings.html'">
         <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="7.5" cy="7.5" r="2"/>
@@ -197,18 +65,12 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
         </svg>
         Settings
       </button>
-      <button class="nav-item" onclick="window.location.href='settings.html'">
-        <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="7.5" cy="5" r="2.8"/><path d="M1.5 13.5c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
-        </svg>
-        Profile
-      </button>
     </div>
 
-    <!-- Search Log -->
+    <!-- Query log -->
     <div class="search-log">
       <div class="log-header">
-        <span class="log-title">Search Log</span>
+        <span class="log-title">Query Log</span>
       </div>
       <div class="log-list" id="log-list">
         <div class="log-empty">
@@ -218,30 +80,19 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
               <circle cx="7" cy="9.5" r="0.5" fill="currentColor"/>
             </svg>
           </div>
-          <div class="log-empty-text">No searches yet.<br/>Add a topic to begin.</div>
+          <div class="log-empty-text">No queries yet.<br/>Add a topic to begin.</div>
         </div>
       </div>
     </div>
 
     <!-- Footer -->
     <div class="sidebar-footer">
-      <div class="user-pill" onclick="window.location.href='settings.html'" style="cursor:pointer" title="Go to settings">
+      <div class="user-pill" onclick="window.location.href='settings.html'" style="cursor:pointer" title="Open settings">
         <div class="avatar" id="user-avatar">U</div>
         <span class="user-email" id="user-email">user@email.com</span>
       </div>
-      <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">
-        <svg class="icon-sun" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <circle cx="7" cy="7" r="2.5"/>
-          <line x1="7" y1="1" x2="7" y2="2.5"/><line x1="7" y1="11.5" x2="7" y2="13"/>
-          <line x1="1" y1="7" x2="2.5" y2="7"/><line x1="11.5" y1="7" x2="13" y2="7"/>
-          <line x1="3" y1="3" x2="4.1" y2="4.1"/><line x1="9.9" y1="9.9" x2="11" y2="11"/>
-          <line x1="11" y1="3" x2="9.9" y2="4.1"/><line x1="4.1" y1="9.9" x2="3" y2="11"/>
-        </svg>
-        <svg class="icon-moon" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <path d="M12 9.5A6 6 0 0 1 4.5 2a6 6 0 1 0 7.5 7.5z"/>
-        </svg>
-      </button>
-      <button class="theme-btn" onclick="handleLogout()" title="Sign out" style="flex-shrink:0">
+      <select class="palette-select" id="palette-select" title="Switch palette"></select>
+      <button class="theme-btn" onclick="handleLogout()" title="Sign out">
         <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M5 12H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h2"/>
           <polyline points="9,10 12,7 9,4"/>
@@ -258,7 +109,13 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
         <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
         </svg>
-        Add Topic
+        New topic
+      </button>
+      <button class="file-article-btn" onclick="Dossier.openModal()">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="10" height="10">
+          <path d="M1 3.5h4l1 1.5h5v5.5H1z"/>
+        </svg>
+        File article
       </button>
       <div class="search-wrap">
         <span class="search-ico">
@@ -268,8 +125,12 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
         </span>
         <input class="search-input" type="text" placeholder="Search topics, subtopics, sources…" oninput="handleSearch(this.value)"/>
       </div>
+      <div class="wire standby" id="wire-line">
+        <span class="live"><span class="dot"></span>STANDBY</span>
+        <span class="sep">│</span>AWAITING FIRST SWEEP
+      </div>
       <div class="topbar-right">
-        <button class="icon-btn" title="Refresh all" onclick="refreshAll()">
+        <button class="icon-btn" title="Refresh all topics" onclick="refreshAll()">
           <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12.5 7a5.5 5.5 0 1 1-5.5-5.5c1.5 0 2.9.6 3.9 1.6"/>
             <polyline points="11,1.5 11,4 13.5,4"/>
@@ -327,34 +188,30 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
 
       <!-- Step 2 -->
       <div class="overlay-step" id="step-2">
-        <!-- X -->
-        <div class="source-section" id="source-section-x">
-          <div class="source-section-header" onclick="Overlay.toggleSection('x')">
-            <div class="source-icon x-icon"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></div>
-            <span class="source-section-name">X (Twitter)</span>
-            <span class="source-section-count" id="x-count"></span>
+
+        <!-- Websites -->
+        <div class="source-section" id="source-section-web">
+          <div class="source-section-header" onclick="Overlay.toggleSection('web')">
+            <div class="source-icon web-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="3" y1="6" x2="17" y2="6"/><line x1="3" y1="14" x2="17" y2="14"/></svg></div>
+            <span class="source-section-name">Websites</span>
+            <span class="source-section-count" id="web-count"></span>
             <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
           </div>
           <div class="source-section-body">
-            <div class="source-type-toggle">
-              <button class="type-btn active" id="x-mode-topic"   onclick="Overlay.setXMode('topic')">Topic search</button>
-              <button class="type-btn"        id="x-mode-handle"  onclick="Overlay.setXMode('handle')">Specific handle</button>
-            </div>
             <div class="source-input-row">
-              <span class="source-prefix" id="x-prefix" style="display:none">@</span>
-              <input class="source-input" id="x-source-input" placeholder="e.g. AI regulation, GPT" autocomplete="off"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('x')}"/>
-              <button class="source-add-btn" onclick="Overlay.addSource('x')">+ Add</button>
+              <input class="source-input" id="web-input" placeholder="reuters.com or https://www.bbc.com/news" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('web')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('web')">+ Add</button>
             </div>
-            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Results pulled from Google-indexed X posts</div>
-            <div class="source-tags" id="x-tags"></div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Paste any link — full URLs and bare domains both work</div>
+            <div class="source-tags" id="web-tags"></div>
           </div>
         </div>
 
         <!-- Reddit -->
         <div class="source-section" id="source-section-reddit">
           <div class="source-section-header" onclick="Overlay.toggleSection('reddit')">
-            <div class="source-icon reddit-icon"><svg viewBox="0 0 24 24" fill="white"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg></div>
+            <div class="source-icon reddit-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg></div>
             <span class="source-section-name">Reddit</span>
             <span class="source-section-count" id="reddit-count"></span>
             <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
@@ -366,35 +223,16 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
                 onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('reddit')}"/>
               <button class="source-add-btn" onclick="Overlay.addSource('reddit')">+ Add</button>
             </div>
-            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Results sourced from Google-indexed Reddit threads</div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Read from subreddit feeds, with a Google fallback if blocked</div>
             <div class="source-tags" id="reddit-tags"></div>
           </div>
         </div>
 
-        <!-- Web -->
-        <div class="source-section" id="source-section-web">
-          <div class="source-section-header" onclick="Overlay.toggleSection('web')">
-            <div class="source-icon web-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="3" y1="6" x2="17" y2="6"/><line x1="3" y1="14" x2="17" y2="14"/></svg></div>
-            <span class="source-section-name">Websites</span>
-            <span class="source-section-count" id="web-count"></span>
-            <span class="source-chevron"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,4 6,8 10,4"/></svg></span>
-          </div>
-          <div class="source-section-body">
-            <div class="source-input-row">
-              <input class="source-input" id="web-input" placeholder="reuters.com, bbc.co.uk…" autocomplete="off"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('web')}"/>
-              <button class="source-add-btn" onclick="Overlay.addSource('web')">+ Add</button>
-            </div>
-            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Domain only — no https:// needed</div>
-            <div class="source-tags" id="web-tags"></div>
-          </div>
-        </div>
-
-        <!-- All sources toggle -->
+        <!-- Broad search toggle -->
         <div class="all-sources-block" id="all-sources-block" onclick="Overlay.toggleAllSources()">
           <div class="all-sources-text">
             <div class="all-sources-title">Broad web search <span class="all-sources-badge">Optional</span></div>
-            <div class="all-sources-desc">Search the open web using AI-generated booster terms. Results shown in a separate expandable panel.</div>
+            <div class="all-sources-desc">Search the open web beyond your listed sources. Extra finds appear in a separate panel on each subtopic.</div>
           </div>
           <div class="toggle-switch" id="all-sources-toggle"></div>
         </div>
@@ -446,10 +284,8 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
   <div class="fullscreen-body" id="fullscreen-body"></div>
 </div>
 
-<!-- Scripts — order matters, NO defer (inline script depends on these being defined) -->
 <!-- ════════════════════════════════════════════
      COLUMN CONFIRM MODAL
-     Used for Clear Subtopics and Delete Topic.
      ════════════════════════════════════════════ -->
 <div class="confirm-modal-backdrop" id="confirm-modal-backdrop" onclick="ColMenu.handleBackdropClick(event)">
   <div class="confirm-modal" id="confirm-modal">
@@ -474,20 +310,20 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
      ════════════════════════════════════════════ -->
 <div class="confirm-modal-backdrop" id="edit-sources-backdrop" onclick="ColMenu.handleEditBackdropClick(event)">
   <div class="confirm-modal edit-sources-modal" id="edit-sources-modal">
-    <div class="confirm-modal-title">Edit Sources</div>
+    <div class="confirm-modal-title">Edit sources</div>
     <div class="confirm-modal-body" style="margin-bottom:16px" id="edit-sources-topic-name"></div>
 
-    <!-- X -->
+    <!-- Websites -->
     <div class="edit-sources-section">
       <div class="edit-sources-label">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        X (Twitter)
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>
+        Websites
       </div>
-      <div class="edit-source-tags" id="edit-x-tags"></div>
+      <div class="edit-source-tags" id="edit-web-tags"></div>
       <div class="edit-source-input-row">
-        <input class="edit-source-input" id="edit-x-input" placeholder="@handle or topic keyword"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('x')}"/>
-        <button class="edit-source-add" onclick="ColMenu.addEditSource('x')">+ Add</button>
+        <input class="edit-source-input" id="edit-web-input" placeholder="reuters.com or https://www.bbc.com/news"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('web')}"/>
+        <button class="edit-source-add" onclick="ColMenu.addEditSource('web')">+ Add</button>
       </div>
     </div>
 
@@ -505,20 +341,6 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
       </div>
     </div>
 
-    <!-- Web -->
-    <div class="edit-sources-section">
-      <div class="edit-sources-label">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>
-        Websites
-      </div>
-      <div class="edit-source-tags" id="edit-web-tags"></div>
-      <div class="edit-source-input-row">
-        <input class="edit-source-input" id="edit-web-input" placeholder="reuters.com, bbc.co.uk"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();ColMenu.addEditSource('web')}"/>
-        <button class="edit-source-add" onclick="ColMenu.addEditSource('web')">+ Add</button>
-      </div>
-    </div>
-
     <div class="confirm-modal-actions" style="margin-top:8px">
       <button class="btn btn-ghost btn-sm" onclick="ColMenu.closeEditSources()">Cancel</button>
       <button class="btn btn-primary btn-sm" onclick="ColMenu.saveEditSources()">Save sources</button>
@@ -526,10 +348,46 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
   </div>
 </div>
 
+<!-- ════════════════════════════════════════════
+     FILE ARTICLE MODAL (Dossier)
+     ════════════════════════════════════════════ -->
+<div class="confirm-modal-backdrop" id="dossier-backdrop" onclick="Dossier.handleBackdrop(event)">
+  <div class="confirm-modal" onclick="event.stopPropagation()">
+    <div class="confirm-modal-title">File an article</div>
+    <div class="confirm-modal-body" style="margin-bottom:16px">Saved to your dossier and library. Full URLs and bare domains both work.</div>
+
+    <div class="dossier-field">
+      <label for="dossier-url">Link</label>
+      <input class="dossier-input" id="dossier-url" placeholder="https://www.reuters.com/article… or reuters.com/article…"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();Dossier.save()}"/>
+    </div>
+    <div class="dossier-error" id="dossier-error"></div>
+    <div class="dossier-field">
+      <label for="dossier-title">Title <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+      <input class="dossier-input" id="dossier-title" placeholder="Defaults to the link itself"/>
+    </div>
+    <div class="dossier-field">
+      <label for="dossier-topic">Topic</label>
+      <select class="dossier-select" id="dossier-topic"><option value="">No topic</option></select>
+    </div>
+    <div class="dossier-field">
+      <label for="dossier-note">Note <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+      <textarea class="dossier-textarea" id="dossier-note" placeholder="Why this matters, where it fits…"></textarea>
+    </div>
+
+    <div class="confirm-modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="Dossier.closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="Dossier.save()">File article</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/topic.service.js"></script>
+<script src="js/article.service.js"></script>
 <script src="js/gemini.service.js"></script>
+<script src="js/dossier.js"></script>
 <script src="js/topic-overlay.js"></script>
 <script src="js/kanban.js"></script>
 <script>
@@ -578,8 +436,14 @@ function initSuggestions() {
   });
 }
 
-/* Theme */
-function toggleTheme() { Theme.toggle(); }
+/* Palette switcher */
+function initPaletteSelect() {
+  const sel = document.getElementById('palette-select');
+  if (!sel) return;
+  sel.innerHTML = Theme.list().map(p => `<option value="${p.id}">${p.label}</option>`).join('');
+  sel.value = Theme.get();
+  sel.onchange = () => Theme.set(sel.value);
+}
 
 /* Search (client-side filter) */
 function handleSearch(query) {
@@ -611,6 +475,7 @@ function loadUser() {
 Theme.init();
 Router.requireAuth();
 loadUser();
+initPaletteSelect();
 initSuggestions();
 Kanban.init();
 

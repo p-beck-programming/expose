@@ -116,7 +116,7 @@ const GeminiService = (() => {
       queriesUsed.push(plan.query);
 
       if (body && body.ok) {
-        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length });
+        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length, backend: body.backend || '' });
         all = all.concat(body.items);
         continue;
       }
@@ -271,7 +271,7 @@ Rules:
     const lastUpdated = topic.updatedAt ? new Date(topic.updatedAt).getTime() : 0;
     const ageMinutes  = (Date.now() - lastUpdated) / 60000;
     if (ageMinutes < CACHE_MINUTES && (topic.subtopics || []).length > 0) {
-      return { success: true, subtopics: topic.subtopics, fromCache: true };
+      return { success: true, subtopics: topic.subtopics, fromCache: true, sourceReport: null };
     }
 
     /* ── Rotate sources, increment offset (X sources dropped) ── */
@@ -376,6 +376,7 @@ Rules:
     return {
       success:   true,
       subtopics,
+      sourceReport,
       fromCache: false,
     };
   }
