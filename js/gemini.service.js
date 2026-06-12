@@ -1,65 +1,57 @@
 /* ═══════════════════════════════════════════════
-   EXPOSÉ — gemini.service.js
+   EXPOSÉ — gemini.service.js  (v3: feed-first pipeline)
 
-   Single-pass approach (optimization 1):
-   One API call searches, reads, and returns
-   structured subtopics. No second pass needed.
+   ARCHITECTURE CHANGE FROM v2:
+   v2 asked Gemini (with Google Search grounding) to both FIND
+   sources and ORGANIZE them. That coupling caused hallucinated
+   URLs and wrong-article links, and burned grounded-request quota.
 
-   Optimizations applied:
-     1. Single pass — halves API call count
-     2. maxOutputTokens: 2600 (flash-lite needs ~2400 for 3 subtopics).
-      thinkingConfig.thinkingBudget: 0 disables chain-of-thought.
-      Do not set both thinkingBudget and thinkingLevel — 400 error.
-     3. Tighter, directive prompt language
-     4. Fixed at exactly 3 subtopics per refresh
-     5. 6 total sources per subtopic max (hard trim)
-        with rotation across user-defined sources
+   v3 splits the jobs:
+     1. FETCH  — real items come from the Exposé Cloudflare Worker
+                 (Google News RSS per source + Reddit best-effort).
+                 Every URL originates from a live feed.
+     2. CLUSTER — Gemini (NO tools, NO grounding) only groups the
+                 fetched items by ID. It never sees or emits URLs.
+                 Returned IDs are validated against the fetched set,
+                 so hallucinated/mismatched links are impossible.
 
-   Broad web search remains a separate optional call,
-   only triggered when topic.allSourcesEnabled = true.
+   Kept from v2 (same public contract — kanban.js unchanged):
+     - fetchSubtopics(topic) → { success, subtopics, fromCache }
+     - subtopic shape: { id, name, summary, score, sourceCount,
+       sources: { x, reddit, web }, broadSources, groundingChunks }
+       (x is always [] — X support removed. groundingChunks is
+       always [] — kanban renders nothing for both. No UI edits.)
+     - 30-minute cache guard, source rotation, MAX_SUBTOPICS = 3,
+       MAX_SOURCES = 6, query logging via TopicService.appendLog.
 
-   Source rotation (suggestion 5):
-   Each refresh increments topic.sourceRotationOffset
-   by 1 (persisted via TopicService.updateTopic).
-   _getRotatedSources() uses this offset to slice a
-   window of up to 6 sources across all source types,
-   distributing proportionally. Over N refreshes every
-   user-defined source gets included in rotation.
-
-   30-minute cache guard (suggestion 7, Option A):
-   fetchSubtopics() checks topic.updatedAt before
-   calling Gemini. If data is less than 30 minutes
-   old it returns the cached subtopics immediately,
-   consuming zero tokens.
+   LINK FORMAT NOTE (why urlResolved is usually false):
+   Google fully migrated News links to a locked format that can
+   only be resolved via their internal batchexecute endpoint,
+   which heavily rate-limits (429) server-side callers. We keep
+   Google's redirect links — they open the correct article — and
+   display the clean publisher name from the feed's <source> tag.
 
    DEPLOYMENT NOTES:
-   1. MODEL: gemini-2.5-flash-lite — budget/speed tier of
-      the 2.5 family. No thinking tokens, high RPD, designed
-      for high-volume low-latency tasks. Do NOT use:
-      - gemini-2.0-flash (shuts down June 1 2026)
-      - gemini-1.5-flash (shut down, returns 404)
-      - gemini-2.5-flash (thinking model, ~2200 tokens/call)
-   2. API KEY: localStorage expose_settings_v1.
-      Move server-side for multi-user production.
-   3. CORS: Direct browser fetch allowed by Google.
-   4. HTTPS: Required. file:// blocked by Gemini.
-   5. FREE TIER: 15 RPM, 1M tokens/day, 500 grounded
-      requests/day. Single-pass + cache guard makes
-      this viable for 4-6 topics at hourly refresh.
-   6. MIGRATION: Replace _callGemini() fetch() with
-      proxy endpoint. Nothing else changes.
-   7. SUGGESTION 6 (skipped, revisit if needed):
-      Only refresh topics viewed in last 24h.
-      Track topic.lastViewedAt in topic.service.js.
+   1. WORKER: PROXY below must match your deployed Worker URL.
+   2. MODEL: gemini-2.5-flash-lite, text-only. No grounded-request
+      quota consumed at all now; token use per refresh is small
+      (one call, ~1200 max output tokens, no URLs in output).
+   3. API KEY: unchanged — localStorage expose_settings_v1.
+   4. MIGRATION: _fetchItems() moves server-side as-is later;
+      _callGemini() swaps to a proxy endpoint. Contract stable.
    ═══════════════════════════════════════════════ */
 
 const GeminiService = (() => {
 
-  const MODEL         = 'gemini-2.5-flash-lite'; // budget/speed model: no thinking tokens, high RPD, not deprecated
+  const PROXY         = 'https://expose-proxy.pbeckman731.workers.dev';
+  const MODEL         = 'gemini-2.5-flash-lite';
   const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-  const MAX_SOURCES   = 6;  // hard cap on total sources per subtopic
-  const MAX_SUBTOPICS = 3;  // fixed subtopic count per refresh
-  const CACHE_MINUTES = 30; // skip fetch if data is fresher than this
+  const MAX_SOURCES   = 6;    // hard cap on total sources per subtopic
+  const MAX_SUBTOPICS = 3;    // fixed subtopic count per refresh
+  const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
+  const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
+  const PER_QUERY     = 8;    // items requested per source query
+  const MAX_ITEMS     = 30;   // total item pool sent to clustering
 
   /* ── Get API key ── */
   function getApiKey() {
@@ -74,20 +66,115 @@ const GeminiService = (() => {
     try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; }
   }
 
-  /* ── Core Gemini call ── */
-  async function _callGemini(prompt, useSearch) {
+  /* ════════════════════════════════════════════
+     STAGE 1 — FETCH real items via the Worker
+  ════════════════════════════════════════════ */
+
+  function _newsUrl(q) {
+    return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${PER_QUERY}`;
+  }
+
+  /* Build one Worker request per rotated source.
+     web domains → Google News site: query
+     reddit subs → Worker's reddit endpoint
+     x handles   → skipped (X support removed)            */
+  function _buildPlans(topicName, rotated, includeBroad) {
+    const plans = [];
+    (rotated.web || []).forEach(domain => {
+      const d = String(domain).trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+      if (d) plans.push({ label: d, kind: 'news', query: `${topicName} site:${d}`,
+                          url: _newsUrl(`${topicName} site:${d}`) });
+    });
+    (rotated.reddit || []).forEach(sub => {
+      const s = String(sub).trim().replace(/^\/+/, '').replace(/^r\//i, '').replace(/\/+$/, '');
+      if (s) plans.push({ label: `r/${s}`, kind: 'reddit', query: `r/${s}`,
+                          url: `${PROXY}/?type=reddit&sub=${encodeURIComponent(s)}&limit=${PER_QUERY}` });
+    });
+    if (includeBroad || plans.length === 0) {
+      plans.push({ label: '(broad search)', kind: 'news', query: topicName,
+                   url: _newsUrl(topicName) });
+    }
+    return plans;
+  }
+
+  async function _fetchItems(topicName, rotated, includeBroad) {
+    const plans = _buildPlans(topicName, rotated, includeBroad);
+
+    const results = await Promise.allSettled(
+      plans.map(p => fetch(p.url).then(r => r.json()))
+    );
+
+    const sourceReport = [];
+    const queriesUsed  = [];
+    let   all          = [];
+    let   redditFellBack = false;
+
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i];
+      const body = results[i].status === 'fulfilled' ? results[i].value : null;
+      queriesUsed.push(plan.query);
+
+      if (body && body.ok) {
+        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length });
+        all = all.concat(body.items);
+        continue;
+      }
+
+      const reason = body ? body.error : 'network_error';
+      sourceReport.push({ source: plan.label, status: reason, count: 0 });
+
+      // Reddit blocked → one thin fallback through Google's index.
+      if (plan.kind === 'reddit' && !redditFellBack) {
+        redditFellBack = true;
+        try {
+          const fb = await fetch(_newsUrl(`${topicName} site:reddit.com`)).then(r => r.json());
+          if (fb.ok && fb.items.length) {
+            fb.items.forEach(it => { if (!it.source) it.source = 'reddit (via Google)'; });
+            all = all.concat(fb.items);
+            sourceReport.push({ source: 'reddit (via Google)', status: 'fallback', count: fb.items.length });
+          }
+        } catch { /* fallback is best-effort by definition */ }
+      }
+    }
+
+    // Dedupe (same story arrives via multiple queries), newest first, cap.
+    const seen  = new Set();
+    const items = [];
+    all.sort((a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || ''));
+    for (const it of all) {
+      const key = it.urlResolved && it.url
+        ? it.url
+        : String(it.title || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(it);
+      if (items.length >= MAX_ITEMS) break;
+    }
+    items.forEach((it, idx) => { it.poolId = 'n' + (idx + 1); });
+
+    return { items, sourceReport, queriesUsed };
+  }
+
+  /* ════════════════════════════════════════════
+     STAGE 2 — CLUSTER items with Gemini (text-only)
+  ════════════════════════════════════════════ */
+
+  async function _callGemini(prompt) {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('NO_API_KEY');
 
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature:     1.0,  // required for grounding per Google docs
-        maxOutputTokens: 2600, // raised from 1200 — flash-lite needs ~2400 for 3 full subtopics
-        thinkingConfig:  { thinkingBudget: 0 }, // disable thinking tokens — saves ~2200 tokens/call
+        temperature:      0.2,  // no grounding requirement anymore — low temp = stable JSON
+        maxOutputTokens:  1200, // small now: no URLs in the output (was 2600)
+        thinkingConfig:   { thinkingBudget: 0 },
+        responseMimeType: 'application/json',
       },
+      // NOTE: no `tools` — grounding removed on purpose. The model
+      // must never search; it only organizes what we fetched.
     };
-    if (useSearch) body.tools = [{ google_search: {} }];
 
     const res = await fetch(`${API_URL}?key=${apiKey}`, {
       method:  'POST',
@@ -108,67 +195,15 @@ const GeminiService = (() => {
     const candidate = data.candidates?.[0];
     if (!candidate) throw new Error('No response from Gemini');
 
-    // Take only the first non-empty text part.
-    // Gemini sometimes emits duplicate parts with identical content — concatenating
-    // them produces doubled JSON that breaks _extractJSON. Taking the first part
-    // that contains a JSON block is the safest approach.
-    const parts    = candidate.content?.parts || [];
+    // Keep the duplicate-parts guard from v2: take the first part
+    // containing a JSON block rather than concatenating all parts.
+    const parts     = candidate.content?.parts || [];
     const firstJSON = parts.find(p => p.text && (p.text.includes('{') || p.text.includes('[')));
-    const text      = firstJSON?.text || parts.find(p => p.text)?.text || '';
-    const grounding = candidate.groundingMetadata || {};
-    return { text, grounding };
+    return firstJSON?.text || parts.find(p => p.text)?.text || '';
   }
 
-  /* ── Match grounding chunk URLs to source objects ────────────
-     Compares source domain names against grounding chunk titles.
-     When a match is found, attaches the redirect URL to the
-     source object. Displayed as clean domain label + redirect href.
-
-     OPTION 2 NOTE (future upgrade):
-     Replace the redirect URL with a resolved permanent URL by
-     calling a proxy endpoint: GET /api/resolve?url=<redirect>
-     The proxy follows the redirect server-side and returns the
-     final article URL. Requires one serverless function
-     (Cloudflare Worker / Netlify Function). No Gemini tokens used.
-  ─────────────────────────────────────────────────────────────── */
-  function _matchGroundingUrls(subtopics, groundingChunks) {
-    if (!groundingChunks?.length) return subtopics;
-
-    // Build a lookup: normalised domain → redirect URL
-    const chunkMap = {};
-    groundingChunks.forEach(chunk => {
-      if (!chunk.web?.uri) return;
-      const title = (chunk.web.title || '').toLowerCase().replace(/^www\./, '');
-      const uri   = chunk.web.uri;
-      if (title) chunkMap[title] = uri;
-    });
-
-    function normaliseDomain(s) {
-      return (s || '').toLowerCase()
-        .replace(/^https?:\/\//, '')
-        .replace(/^www\./, '')
-        .replace(/\/.*$/, '')
-        .trim();
-    }
-
-    return subtopics.map(sub => {
-      const updatedSources = {};
-      ['x', 'reddit', 'web'].forEach(type => {
-        updatedSources[type] = (sub.sources?.[type] || []).map(article => {
-          if (article.url) return article; // already has a URL, keep it
-          const domain = normaliseDomain(article.source);
-          // Try exact match first, then partial match
-          const matchedUrl = chunkMap[domain]
-            || Object.entries(chunkMap).find(([k]) => k.includes(domain) || domain.includes(k))?.[1]
-            || '';
-          return { ...article, url: matchedUrl };
-        });
-      });
-      return { ...sub, sources: updatedSources };
-    });
-  }
-
-  /* ── Strip markdown fences and parse JSON ── */
+  /* ── Strip markdown fences and parse JSON (kept from v2;
+        responseMimeType makes fences rare but not impossible) ── */
   function _extractJSON(text) {
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch {} }
@@ -178,83 +213,50 @@ const GeminiService = (() => {
     return null;
   }
 
-  /* ── Source rotation ──────────────────────────
-     Distributes MAX_SOURCES slots across source
-     types based on user config. Uses offset to
-     rotate the window each refresh so all sources
-     get coverage over time.
+  function _clusterPrompt(topicName, items) {
+    const lines = items.map(it => {
+      const date = (it.publishedAt || '').slice(0, 10);
+      const snip = it.snippet ? ` | ${it.snippet.slice(0, 150)}` : '';
+      return `${it.poolId} | ${it.source || it.sourceDomain || 'web'} | ${date} | ${it.title}${snip}`;
+    }).join('\n');
 
-     Example: 4 web + 2 reddit + 1 X = 7 total.
-     MAX_SOURCES = 6, so one is skipped per refresh.
-     Offset increments each call, rotating which
-     source is excluded. After 7 refreshes, all
-     sources have been included.
-  ─────────────────────────────────────────────── */
-  function _getRotatedSources(sources, offset) {
-    const x      = sources.x      || [];
-    const reddit = sources.reddit || [];
-    const web    = sources.web    || [];
-    const total  = x.length + reddit.length + web.length;
+    return `You are organizing OSINT monitoring results for the topic: "${topicName}".
+Below is a numbered list of real items fetched from live feeds.
+Each line: ID | source | date | title | optional snippet.
 
-    // No rotation needed if within budget
-    if (total <= MAX_SOURCES) return { x, reddit, web };
+${lines}
 
-    // Flat ordered list of all sources
-    const all = [
-      ...x.map(v      => ({ type: 'x',      value: v })),
-      ...reddit.map(v => ({ type: 'reddit', value: v })),
-      ...web.map(v    => ({ type: 'web',    value: v })),
-    ];
+Group these into at most ${MAX_SUBTOPICS} emerging subtopics (distinct stories or developments).
 
-    // Rotating window
-    const start  = offset % total;
-    const window = [];
-    for (let i = 0; i < MAX_SOURCES; i++) {
-      window.push(all[(start + i) % total]);
-    }
-
-    return {
-      x:      window.filter(s => s.type === 'x').map(s => s.value),
-      reddit: window.filter(s => s.type === 'reddit').map(s => s.value),
-      web:    window.filter(s => s.type === 'web').map(s => s.value),
-    };
+Rules:
+- Respond with ONLY valid JSON. No markdown, no commentary, no code fences.
+- Schema: {"subtopics":[{"name":"max 8 word title","summary":"1-2 factual sentences","score":85,"itemIds":["n1","n3"]}]}
+- score: 0-100 significance/urgency of the subtopic for this monitoring topic.
+- itemIds MUST be IDs from the list above. Never invent IDs. Never include URLs anywhere.
+- Prefer subtopics supported by 2 or more items. Ignore items that fit nowhere.`;
   }
 
-  /* ── Build terse search scope string ── */
-  function _buildScope(rotated, expandTopics) {
-    const parts = [];
-    if (rotated.web.length)    parts.push(rotated.web.map(s => `site:${s}`).join(' OR '));
-    if (rotated.reddit.length) parts.push(rotated.reddit.map(s => `site:reddit.com ${s}`).join(' OR '));
-    if (rotated.x.length)      parts.push(rotated.x.map(s =>
-      s.startsWith('@') ? `site:x.com ${s.slice(1)}` : `site:x.com "${s}"`
-    ).join(' OR '));
-    const scope  = parts.length ? parts.join(' OR ') : 'any relevant source';
-    const expand = expandTopics ? ' Include related angles and emerging subtopics.' : '';
-    return scope + expand;
-  }
-
-  /* ── Hard trim sources after parsing ─────────
-     Enforces MAX_SOURCES cap regardless of what
-     Gemini returned. Distributes evenly across
-     types with any remainder going to web.
-  ─────────────────────────────────────────────── */
-  function _trimSources(subtopic) {
-    const s        = subtopic.sources || { x: [], reddit: [], web: [] };
-    const perType  = Math.floor(MAX_SOURCES / 3); // 2 each
-    const remainder = MAX_SOURCES - (perType * 3); // leftover to web
-    return {
-      ...subtopic,
-      sources: {
-        x:      (s.x      || []).slice(0, perType),
-        reddit: (s.reddit || []).slice(0, perType),
-        web:    (s.web    || []).slice(0, perType + remainder),
-      },
-    };
+  /* ── Bucket validated items into the kanban source shape ──
+     reddit items → sources.reddit, everything else → sources.web,
+     sources.x stays [] (kanban skips empty groups). Caps at
+     MAX_SOURCES total: up to 2 reddit, remainder web.            */
+  function _toSourceBuckets(linkedItems) {
+    const isReddit = it => it.sourceDomain === 'reddit.com' || /^r\//i.test(it.source || '');
+    const art = it => ({
+      title:       it.title,
+      source:      it.source || it.sourceDomain || 'web',
+      url:         it.url || '',
+      publishedAt: it.publishedAt || '',
+    });
+    const reddit = linkedItems.filter(isReddit).slice(0, 2).map(art);
+    const web    = linkedItems.filter(it => !isReddit(it)).slice(0, MAX_SOURCES - reddit.length).map(art);
+    return { x: [], reddit, web };
   }
 
   /* ════════════════════════════════════════════
      MAIN EXPORT: fetchSubtopics
      Called by kanban.js on each topic refresh.
+     Contract identical to v2.
   ════════════════════════════════════════════ */
   async function fetchSubtopics(topic) {
     if (!getApiKey()) {
@@ -272,42 +274,42 @@ const GeminiService = (() => {
       return { success: true, subtopics: topic.subtopics, fromCache: true };
     }
 
-    /* ── Rotate sources, increment offset ── */
-    const offset         = topic.sourceRotationOffset || 0;
-    const rotatedSources = _getRotatedSources(topic.sources || {}, offset);
-
-    // Persist incremented offset — fire and forget
+    /* ── Rotate sources, increment offset (X sources dropped) ── */
+    const offset  = topic.sourceRotationOffset || 0;
+    const rotated = _getRotatedSources(topic.sources || {}, offset);
     TopicService.updateTopic(topic.id, { sourceRotationOffset: offset + 1 });
 
-    const settings    = _getSettings();
+    const settings     = _getSettings();
     const expandTopics = settings.expandTopics !== false;
-    const scope        = _buildScope(rotatedSources, expandTopics);
 
-    /* ── Single-pass prompt ── */
-    const prompt =
-`OSINT task. Search for recent news about: "${topic.name}"
-Scope: ${scope}
-Find content from last 72h. Identify exactly ${MAX_SUBTOPICS} distinct subtopics from what you find.
-Subtopics must emerge from real source data — not invented. Each is a genuine angle or development.
-Return ONLY valid JSON, no other text:
-{"subtopics":[{"id":"s1","name":"max 8 word title","summary":"1-2 sentence summary of what sources say","score":85,"sourceCount":4,"sources":{"x":[{"title":"headline","source":"@handle","url":""}],"reddit":[{"title":"thread","source":"r/sub","url":""}],"web":[{"title":"headline","source":"domain.com","url":"https://..."}]},"broadSources":[]}],"searchQueries":["query used"]}`;
-
-    let result;
+    /* ── STAGE 1: fetch real items ── */
+    let fetched;
     try {
-      result = await _callGemini(prompt, true);
+      fetched = await _fetchItems(topic.name, rotated, expandTopics);
+    } catch (err) {
+      return { success: false, error: 'PROXY_ERROR', message: _friendlyError('PROXY_ERROR') };
+    }
+    const { items, sourceReport, queriesUsed } = fetched;
+    console.debug('[Exposé] source report:', sourceReport);
+
+    if (items.length === 0) {
+      const dead = sourceReport.filter(r => r.count === 0).map(r => `${r.source} (${r.status})`).join(', ');
+      return {
+        success: false,
+        error:   'NO_RESULTS',
+        message: `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
+      };
+    }
+
+    /* ── STAGE 2: cluster by ID ── */
+    let text;
+    try {
+      text = await _callGemini(_clusterPrompt(topic.name, items));
     } catch (err) {
       return { success: false, error: err.message, message: _friendlyError(err.message) };
     }
 
-    if (!result.text || result.text.length < 50) {
-      return {
-        success: false,
-        error:   'EMPTY_RESPONSE',
-        message: 'Gemini returned no results — try again.',
-      };
-    }
-
-    const parsed = _extractJSON(result.text);
+    const parsed = _extractJSON(text || '');
     if (!parsed?.subtopics?.length) {
       return {
         success: false,
@@ -316,58 +318,93 @@ Return ONLY valid JSON, no other text:
       };
     }
 
-    // Sort, cap at MAX_SUBTOPICS, hard trim sources, match grounding URLs
-    const groundingChunks = result.grounding?.groundingChunks || [];
+    /* ── Validate IDs against the fetched pool (the hallucination wall),
+          bucket into kanban shape, sort, cap. ── */
+    const byId  = new Map(items.map(it => [it.poolId, it]));
+    const stamp = Date.now().toString(36);
+
     const subtopics = parsed.subtopics
+      .map((st, i) => {
+        const linked = (st.itemIds || []).map(id => byId.get(id)).filter(Boolean);
+        if (!st.name || linked.length === 0) return null;
+        const sources = _toSourceBuckets(linked);
+        return {
+          id:              `s_${stamp}_${i + 1}`, // unique per refresh — avoids DOM id collisions across topics
+          name:            String(st.name),
+          summary:         String(st.summary || ''),
+          score:           Number.isFinite(st.score) ? st.score : 50,
+          sources,
+          sourceCount:     sources.reddit.length + sources.web.length,
+          broadSources:    [],
+          groundingChunks: [], // grounding removed — kanban renders nothing for []
+        };
+      })
+      .filter(Boolean)
       .sort((a, b) => (b.score || 0) - (a.score || 0))
-      .slice(0, MAX_SUBTOPICS)
-      .map(_trimSources);
+      .slice(0, MAX_SUBTOPICS);
 
-    // Attach redirect URLs from grounding chunks to source objects
-    const linkedSubtopics = _matchGroundingUrls(subtopics, groundingChunks);
-
-    // Store grounding chunks on each subtopic so the fullscreen overlay
-    // can render a verified sources panel as a fallback
-    linkedSubtopics.forEach(sub => {
-      sub.groundingChunks = groundingChunks;
-    });
-
-    /* ── Optional broad search (separate call) ── */
-    if (topic.allSourcesEnabled) {
-      try {
-        const broadPrompt =
-`Search for latest news: "${topic.name}". Return ONLY a JSON array, no other text:
-[{"title":"headline","source":"domain.com","url":"https://..."}]
-Max 4 results.`;
-        const broadResult = await _callGemini(broadPrompt, true);
-        const broadParsed = _extractJSON(broadResult.text);
-        if (Array.isArray(broadParsed) && linkedSubtopics[0]) {
-          // Match grounding chunks from the broad search call too
-          const broadChunks = broadResult.grounding?.groundingChunks || [];
-          const matchedBroad = _matchGroundingUrls(
-            [{ sources: { web: broadParsed.slice(0, 4) } }],
-            broadChunks
-          );
-          linkedSubtopics[0].broadSources = matchedBroad[0]?.sources?.web || broadParsed.slice(0, 4);
-        }
-      } catch { /* non-fatal */ }
+    if (subtopics.length === 0) {
+      return {
+        success: false,
+        error:   'PARSE_ERROR',
+        message: 'Gemini returned no valid subtopics. Try refreshing.',
+      };
     }
 
-    // Log search queries (cap at 3 per refresh)
-    const queries = (parsed.searchQueries || [topic.name]).slice(0, 3);
-    for (const q of queries) {
+    /* ── Optional broad panel (allSourcesEnabled) — items beyond the
+          subtopics' own sources, from the broad query, top 4. ── */
+    if (topic.allSourcesEnabled) {
+      const usedTitles = new Set(
+        subtopics.flatMap(s => [...s.sources.reddit, ...s.sources.web]).map(a => a.title)
+      );
+      subtopics[0].broadSources = items
+        .filter(it => !usedTitles.has(it.title))
+        .slice(0, 4)
+        .map(it => ({ title: it.title, source: it.source || it.sourceDomain || 'web', url: it.url || '' }));
+    }
+
+    /* ── Log queries (cap at 3 per refresh, matching v2) ── */
+    for (const q of queriesUsed.slice(0, 3)) {
       await TopicService.appendLog({
         query:        q,
         topicId:      topic.id,
         topicName:    topic.name,
-        resultsCount: linkedSubtopics.length,
+        resultsCount: subtopics.length,
       });
     }
 
     return {
       success:   true,
-      subtopics: linkedSubtopics,
+      subtopics,
       fromCache: false,
+    };
+  }
+
+  /* ── Source rotation (kept from v2, X filtered out) ──
+     Distributes MAX_SOURCES query slots across the user's
+     reddit + web sources, rotating the window each refresh
+     so every source gets coverage over time.              */
+  function _getRotatedSources(sources, offset) {
+    const reddit = sources.reddit || [];
+    const web    = sources.web    || [];
+    const total  = reddit.length + web.length;
+
+    if (total <= MAX_SOURCES) return { reddit, web };
+
+    const all = [
+      ...reddit.map(v => ({ type: 'reddit', value: v })),
+      ...web.map(v    => ({ type: 'web',    value: v })),
+    ];
+
+    const start  = offset % total;
+    const window = [];
+    for (let i = 0; i < MAX_SOURCES; i++) {
+      window.push(all[(start + i) % total]);
+    }
+
+    return {
+      reddit: window.filter(s => s.type === 'reddit').map(s => s.value),
+      web:    window.filter(s => s.type === 'web').map(s => s.value),
     };
   }
 
@@ -379,6 +416,8 @@ Max 4 results.`;
       INVALID_API_KEY:'API key rejected. Check Settings → Intelligence.',
       EMPTY_RESPONSE: 'Gemini returned no results — try again.',
       PARSE_ERROR:    'Could not parse response. Try refreshing.',
+      PROXY_ERROR:    'Could not reach the Exposé proxy. Check the Worker is deployed.',
+      NO_RESULTS:     'No recent items found from the configured sources.',
     };
     return map[code] || `Gemini error: ${code}`;
   }
