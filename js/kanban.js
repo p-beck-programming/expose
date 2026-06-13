@@ -32,6 +32,7 @@ const Kanban = (() => {
     topics = await TopicService.getTopics();
     renderBoard();
     renderSearchLog();
+    attachWheelHandler();
 
     // Listen for new topics from the overlay
     document.addEventListener('topic:created', async e => {
@@ -54,6 +55,18 @@ const Kanban = (() => {
       }
       fetchTopicData(topic.id);
     });
+  }
+
+  /* ── Wheel: route vertical scroll into col-body, never the board ── */
+  function attachWheelHandler() {
+    const area = document.getElementById('kanban-area');
+    if (!area) return;
+    area.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // let horizontal trackpad gestures pass
+      const colBody = e.target.closest('.col-body');
+      e.preventDefault();
+      if (colBody) colBody.scrollTop += e.deltaY;
+    }, { passive: false });
   }
 
   /* ── Fetch subtopics from Gemini ── */
