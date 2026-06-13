@@ -28,13 +28,13 @@
 .auth-header { text-align: center; margin-bottom: 28px; }
 .auth-logo {
   width: 44px; height: 44px;
-  background: var(--ink);
+  background: var(--acc);
+  color: var(--acc-ink);
   border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 16px;
-  transition: background var(--t-base);
 }
-.auth-logo svg { width: 22px; height: 22px; display: block; }
+.auth-logo svg { width: 22px; height: 22px; display: block; stroke: var(--acc-ink); }
 .auth-title {
   font-family: var(--font-ui); font-size: 20px; font-weight: 700;
   color: var(--ink); margin-bottom: 5px;
@@ -101,26 +101,23 @@
 .refresh-disclaimer {
   display: flex; align-items: flex-start; gap: 8px;
   background: var(--warn-soft);
-  border: 1px solid rgba(180,83,9,0.2);
+  border: 1px solid rgba(232,179,65,0.2);
   border-radius: var(--r-md);
   padding: 10px 14px;
   margin-top: 10px;
   font-size: 11px; color: var(--warn); line-height: 1.55;
 }
-[data-theme="dark"] .refresh-disclaimer { border-color: rgba(245,158,11,0.2); }
 .refresh-disclaimer svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; }
 
 /* Danger zone */
 .danger-zone {
   background: var(--surface);
-  border: 1px solid rgba(192,57,43,0.25);
+  border: 1px solid rgba(229,96,76,0.25);
   border-radius: var(--r-xl);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
 }
-[data-theme="dark"] .danger-zone { border-color: rgba(248,113,113,0.2); }
-.danger-zone .section-card-header { border-bottom-color: rgba(192,57,43,0.15); }
-[data-theme="dark"] .danger-zone .section-card-header { border-bottom-color: rgba(248,113,113,0.1); }
+.danger-zone .section-card-header { border-bottom-color: rgba(229,96,76,0.15); }
 .danger-zone .section-card-title { color: var(--danger); }
 
 /* Confirm modal */
@@ -154,7 +151,8 @@
 .save-toast {
   position: fixed; bottom: 24px; right: 24px; z-index: 999;
   display: flex; align-items: center; gap: 8px;
-  background: var(--ink); color: var(--surface);
+  background: var(--panel2); color: var(--txt);
+  border: 1px solid var(--line);
   border-radius: var(--r-pill); padding: 10px 18px;
   font-family: var(--font-ui); font-size: 12px; font-weight: 600;
   box-shadow: var(--shadow-lg);

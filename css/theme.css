@@ -75,6 +75,11 @@
   --border:var(--line); --border-soft:var(--line-soft);
   --danger:var(--alert); --danger-soft:rgba(229,96,76,.12);
   --warn:var(--warning); --success:var(--ok);
+  /* Transitions */
+  --t-fast:0.12s ease; --t-base:0.20s ease; --t-slow:0.35s ease;
+  /* Semantic soft backgrounds */
+  --warn-soft:rgba(232,179,65,.10);
+  --success-soft:rgba(70,194,142,.10);
 }
 
 /* ═══════════ Base ═══════════ */
@@ -83,7 +88,7 @@ html, body { height:100%; }
 body {
   background:var(--void); color:var(--txt);
   font-family:var(--font-body); font-size:14px;
-  -webkit-font-smoothing:antialiased; overflow:hidden;
+  -webkit-font-smoothing:antialiased;
 }
 button { font-family:inherit; }
 ::selection { background:var(--acc-soft); color:var(--acc-hi); }
