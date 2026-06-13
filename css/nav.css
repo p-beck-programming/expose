@@ -10,14 +10,8 @@
   height: 56px;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 40px;
-  background: rgba(248,246,241,0.88);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--border-soft);
-  transition: background var(--t-base), border-color var(--t-base);
-}
-[data-theme="dark"] .topnav {
-  background: rgba(18,21,27,0.88);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 
 /* Brand */
@@ -27,18 +21,18 @@
 }
 .topnav-mark {
   width: 28px; height: 28px;
-  background: var(--ink);
+  background: var(--acc);
+  color: var(--acc-ink);
   border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  transition: background var(--t-base);
 }
-.topnav-mark svg { width: 15px; height: 15px; display: block; }
+.topnav-mark svg { width: 15px; height: 15px; display: block; stroke: var(--acc-ink); }
 .topnav-name {
   font-family: var(--font-ui);
   font-size: 13px; font-weight: 700;
   letter-spacing: 0.06em;
-  color: var(--ink);
+  color: var(--txt);
 }
 
 /* Right side */
@@ -48,12 +42,12 @@
 
 .topnav-theme {
   width: 30px; height: 30px;
-  background: var(--surface2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-pill);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: var(--ink-muted);
+  cursor: pointer; color: var(--dim);
   transition: all var(--t-fast);
 }
-.topnav-theme:hover { color: var(--ink); border-color: var(--border); }
+.topnav-theme:hover { color: var(--txt); border-color: var(--faint); }
 .topnav-theme svg { width: 13px; height: 13px; display: block; }

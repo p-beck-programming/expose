@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Exposé — Library</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script>
+try {
+  var _s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+  var _p = _s.palette || (_s.theme === 'light' ? 'daybreak' : 'console');
+  document.documentElement.setAttribute('data-palette', _p);
+  document.documentElement.setAttribute('data-theme', _p === 'daybreak' ? 'light' : 'dark');
+} catch (e) {}
+</script>
+<link rel="stylesheet" href="css/theme.css"/>
+<link rel="stylesheet" href="css/overlay.css"/>
+<style>
+/* ── Library page layout ── */
+.lib-main { display:flex; flex-direction:column; height:100vh; }
+.lib-content { flex:1; min-height:0; overflow-y:auto; padding:20px; max-width:880px; margin:0 auto; width:100%; }
+.lib-title-row { display:flex; align-items:baseline; gap:14px; margin-bottom:4px; }
+.lib-title { font-family:var(--font-ui); font-weight:700; font-size:20px; letter-spacing:.12em; text-transform:uppercase; }
+.lib-count { font-family:var(--font-mono); font-size:11.5px; color:var(--faint); }
+.lib-sub { font-size:13px; color:var(--dim); margin-bottom:18px; }
+
+.lib-filters { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:16px; }
+.lib-chip {
+  font-family:var(--font-mono); font-size:11px; padding:5px 11px;
+  border:1px solid var(--line); border-radius:2px;
+  background:none; color:var(--dim); cursor:pointer;
+}
+.lib-chip:hover { color:var(--txt); border-color:var(--faint); }
+.lib-chip.active { background:var(--acc-soft); border-color:var(--acc); color:var(--acc-hi); }
+
+.lib-row {
+  background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r-md);
+  padding:13px 15px; margin-bottom:9px;
+}
+.lib-row:hover { border-color:var(--acc); }
+.lib-row-top { display:flex; align-items:flex-start; gap:10px; }
+.lib-row-title { flex:1; min-width:0; font-weight:600; font-size:13.5px; line-height:1.4; }
+.lib-row-title a { color:var(--txt); text-decoration:none; }
+.lib-row-title a:hover { color:var(--acc-hi); }
+.lib-row-actions { display:flex; gap:5px; flex-shrink:0; }
+.lib-act {
+  border:1px solid var(--line); background:none; border-radius:2px;
+  font-family:var(--font-mono); font-size:9.5px; letter-spacing:.08em;
+  color:var(--faint); padding:3px 8px; cursor:pointer;
+}
+.lib-act:hover { color:var(--acc-hi); border-color:var(--acc); }
+.lib-act.danger:hover { color:var(--alert); border-color:var(--alert); }
+.lib-row-meta {
+  display:flex; align-items:center; gap:9px; margin-top:7px;
+  font-family:var(--font-mono); font-size:10.5px; color:var(--faint);
+}
+.lib-row-meta .src { background:var(--panel3); padding:1px 7px; border-radius:2px; color:var(--dim); }
+.lib-row-meta .topic-tag { border:1px solid var(--line); padding:1px 7px; border-radius:2px; }
+.lib-note { font-family:var(--font-mono); font-size:11px; color:var(--acc-hi); opacity:.85; margin-top:8px; padding-top:7px; border-top:1px dotted var(--line); }
+.lib-note-edit { display:none; margin-top:8px; gap:7px; }
+.lib-note-edit.open { display:flex; }
+.lib-note-edit input {
+  flex:1; padding:7px 10px; background:var(--panel2); border:1px solid var(--line);
+  border-radius:var(--r-sm); color:var(--txt); font-family:var(--font-mono); font-size:11.5px;
+}
+.lib-note-edit input:focus { outline:none; border-color:var(--acc); }
+.lib-empty { text-align:center; padding:70px 20px; color:var(--dim); }
+.lib-empty .big { font-family:var(--font-ui); font-size:14px; letter-spacing:.14em; text-transform:uppercase; color:var(--txt); margin-bottom:8px; }
+.lib-empty p { font-size:13px; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<div class="lib-main">
+  <div class="topbar">
+    <button class="fullscreen-back" onclick="window.location.href='dashboard.html'" style="display:inline-flex;align-items:center;gap:8px;font-family:var(--font-ui);font-size:11.5px;font-weight:600;letter-spacing:.08em;padding:7px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:none;color:var(--dim);cursor:pointer">
+      <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+        <line x1="13" y1="7" x2="1" y2="7"/><polyline points="5,3 1,7 5,11"/>
+      </svg>
+      Dashboard
+    </button>
+    <div class="search-wrap" style="flex:1;max-width:340px">
+      <span class="search-ico">
+        <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="5.5" cy="5.5" r="4"/><line x1="8.8" y1="8.8" x2="12" y2="12"/>
+        </svg>
+      </span>
+      <input class="search-input" id="lib-search" type="text" placeholder="Search filed articles…" oninput="Library.render()"/>
+    </div>
+    <div style="flex:1"></div>
+    <button class="file-article-btn" onclick="Dossier.openModal()">+ File article</button>
+  </div>
+
+  <div class="lib-content">
+    <div class="lib-title-row">
+      <div class="lib-title">Library</div>
+      <div class="lib-count" id="lib-count"></div>
+    </div>
+    <div class="lib-sub">Every article you've filed, across all topics.</div>
+    <div class="lib-filters" id="lib-filters"></div>
+    <div id="lib-list"></div>
+  </div>
+</div>
+
+<!-- File article modal (same as dashboard) -->
+<div class="confirm-modal-backdrop" id="dossier-backdrop" onclick="Dossier.handleBackdrop(event)"
+  style="position:fixed;inset:0;z-index:900;display:none;align-items:center;justify-content:center;background:rgba(5,8,12,.7)">
+  <div class="confirm-modal" onclick="event.stopPropagation()"
+    style="width:min(420px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-md);padding:22px">
+    <div style="font-family:var(--font-ui);font-weight:600;font-size:15px;letter-spacing:.06em;margin-bottom:8px">File an article</div>
+    <div style="font-size:13px;line-height:1.55;color:var(--dim);margin-bottom:16px">Saved to your dossier and library. Full URLs and bare domains both work.</div>
+    <div class="dossier-field">
+      <label for="dossier-url">Link</label>
+      <input class="dossier-input" id="dossier-url" placeholder="https://www.reuters.com/article… or reuters.com/article…"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();Dossier.save()}"/>
+    </div>
+    <div class="dossier-error" id="dossier-error"></div>
+    <div class="dossier-field">
+      <label for="dossier-title">Title <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+      <input class="dossier-input" id="dossier-title" placeholder="Defaults to the link itself"/>
+    </div>
+    <div class="dossier-field">
+      <label for="dossier-topic">Topic</label>
+      <select class="dossier-select" id="dossier-topic"><option value="">No topic</option></select>
+    </div>
+    <div class="dossier-field">
+      <label for="dossier-note">Note <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+      <textarea class="dossier-textarea" id="dossier-note" placeholder="Why this matters, where it fits…"></textarea>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+      <button class="btn btn-ghost btn-sm" onclick="Dossier.closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="Dossier.save()">File article</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/auth.service.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/topic.service.js"></script>
+<script src="js/article.service.js"></script>
+<script src="js/dossier.js"></script>
+<script>
+const Library = (() => {
+  let activeTopic = '__all';
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function renderFilters() {
+    const all = ArticleService.list();
+    const topics = [...new Map(all.filter(a => a.topicId).map(a => [a.topicId, a.topicName])).entries()];
+    const wrap = document.getElementById('lib-filters');
+    const chips = [
+      `<button class="lib-chip ${activeTopic === '__all' ? 'active' : ''}" onclick="Library.setFilter('__all')">ALL (${all.length})</button>`,
+      ...topics.map(([id, name]) =>
+        `<button class="lib-chip ${activeTopic === id ? 'active' : ''}" onclick="Library.setFilter('${esc(id)}')">${esc(name).toUpperCase()} (${ArticleService.count(id)})</button>`),
+    ];
+    const loose = all.filter(a => !a.topicId).length;
+    if (loose) chips.push(`<button class="lib-chip ${activeTopic === '__none' ? 'active' : ''}" onclick="Library.setFilter('__none')">NO TOPIC (${loose})</button>`);
+    wrap.innerHTML = chips.join('');
+  }
+
+  function setFilter(id) { activeTopic = id; render(); }
+
+  function render() {
+    renderFilters();
+    const q = (document.getElementById('lib-search')?.value || '').toLowerCase().trim();
+    let items = ArticleService.list();
+    if (activeTopic === '__none') items = items.filter(a => !a.topicId);
+    else if (activeTopic !== '__all') items = items.filter(a => a.topicId === activeTopic);
+    if (q) items = items.filter(a =>
+      (a.title + ' ' + a.source + ' ' + a.note + ' ' + a.topicName).toLowerCase().includes(q));
+
+    document.getElementById('lib-count').textContent = items.length + ' article' + (items.length !== 1 ? 's' : '');
+
+    const list = document.getElementById('lib-list');
+    if (items.length === 0) {
+      list.innerHTML = `
+        <div class="lib-empty">
+          <div class="big">Nothing filed${q || activeTopic !== '__all' ? ' here' : ' yet'}</div>
+          <p>${q || activeTopic !== '__all'
+            ? 'No filed articles match this filter.'
+            : 'File articles from subtopic cards on the dashboard, or paste a link with the button above.'}</p>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = items.map(a => `
+      <div class="lib-row" data-id="${esc(a.id)}">
+        <div class="lib-row-top">
+          <div class="lib-row-title"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a></div>
+          <div class="lib-row-actions">
+            <button class="lib-act" onclick="Library.toggleNote('${esc(a.id)}')">NOTE</button>
+            <button class="lib-act danger" onclick="Library.remove('${esc(a.id)}')">REMOVE</button>
+          </div>
+        </div>
+        <div class="lib-row-meta">
+          <span class="src">${esc(a.source)}</span>
+          ${a.topicName ? `<span class="topic-tag">${esc(a.topicName)}</span>` : ''}
+          <span>FILED ${esc((a.filedAt || '').slice(0, 10))}</span>
+        </div>
+        ${a.note ? `<div class="lib-note">// ${esc(a.note)}</div>` : ''}
+        <div class="lib-note-edit" id="note-edit-${esc(a.id)}">
+          <input id="note-input-${esc(a.id)}" value="${esc(a.note)}" placeholder="Add a note…"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();Library.saveNote('${esc(a.id)}')}"/>
+          <button class="lib-act" onclick="Library.saveNote('${esc(a.id)}')">SAVE</button>
+        </div>
+      </div>`).join('');
+  }
+
+  function toggleNote(id) {
+    const el = document.getElementById('note-edit-' + id);
+    if (!el) return;
+    el.classList.toggle('open');
+    if (el.classList.contains('open')) document.getElementById('note-input-' + id)?.focus();
+  }
+
+  function saveNote(id) {
+    ArticleService.updateNote(id, document.getElementById('note-input-' + id)?.value);
+    render();
+  }
+
+  function remove(id) {
+    ArticleService.remove(id);
+    render();
+  }
+
+  return { render, setFilter, toggleNote, saveNote, remove };
+})();
+
+/* Boot */
+Theme.init();
+Router.requireAuth();
+Library.render();
+document.addEventListener('dossier:changed', () => Library.render());
+</script>
+</body>
+</html>

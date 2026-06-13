@@ -32,6 +32,7 @@ const Kanban = (() => {
     topics = await TopicService.getTopics();
     renderBoard();
     renderSearchLog();
+    attachWheelHandler();
 
     // Listen for new topics from the overlay
     document.addEventListener('topic:created', async e => {
@@ -56,6 +57,18 @@ const Kanban = (() => {
     });
   }
 
+  /* ── Wheel: route vertical scroll into col-body, never the board ── */
+  function attachWheelHandler() {
+    const area = document.getElementById('kanban-area');
+    if (!area) return;
+    area.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // let horizontal trackpad gestures pass
+      const colBody = e.target.closest('.col-body');
+      e.preventDefault();
+      if (colBody) colBody.scrollTop += e.deltaY;
+    }, { passive: false });
+  }
+
   /* ── Fetch subtopics from Gemini ── */
   async function fetchTopicData(topicId) {
     const topic = topics.find(t => t.id === topicId);
@@ -67,6 +80,7 @@ const Kanban = (() => {
     updateColFetchingState(topicId, true);
 
     const result = await GeminiService.fetchSubtopics(topic);
+    if (result && result.sourceReport && window.Wire) Wire.update(result.sourceReport);
 
     if (result.success) {
       const updated = await TopicService.setSubtopics(topicId, result.subtopics);
@@ -109,6 +123,9 @@ const Kanban = (() => {
     sorted.forEach(topic => {
       area.appendChild(buildColumn(topic));
     });
+
+    // Dossier column always last — filed articles live alongside the topics
+    if (window.Dossier) area.appendChild(Dossier.buildColumn());
   }
 
   /* ── Render a single column in place ── */
@@ -288,6 +305,14 @@ const Kanban = (() => {
   /* ════════════════════════════════
      BUILD SUBTOPIC CARD
   ════════════════════════════════ */
+  /* Signal-strength bars for the relevance score (0–100 → 0–5 bars) */
+  function sigBars(score) {
+    const lit = Math.max(0, Math.min(5, Math.ceil((Number(score) || 0) / 20)));
+    let html = '<span class="sig-bars">';
+    for (let i = 1; i <= 5; i++) html += '<i class="' + (i <= lit ? 'lit' : '') + '"></i>';
+    return html + '</span>';
+  }
+
   function buildCard(sub, topicId, topicName, inPinnedCol = false, isFetching = false) {
     const card = el('div', [
       'subtopic-card',
@@ -302,15 +327,13 @@ const Kanban = (() => {
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
 
     // Source bubbles
-    const xCount      = (sub.sources?.x      || []).length;
     const redditCount = (sub.sources?.reddit  || []).length;
     const webCount    = (sub.sources?.web     || []).length;
     const bubbles = [
-      xCount      > 0 ? `<span class="source-bubble x-bubble">${xLogoSvg(9)}${xCount}</span>` : '',
       redditCount > 0 ? `<span class="source-bubble reddit-bubble">${redditLogoSvg(9)}${redditCount}</span>` : '',
       webCount    > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
     ].join('');
-    const totalSources = xCount + redditCount + webCount;
+    const totalSources = redditCount + webCount;
 
     card.innerHTML = `
       <div class="card-header" onclick="Kanban.toggleCard('${sub.id}', '${topicId}', event)">
@@ -337,7 +360,7 @@ const Kanban = (() => {
         <div class="source-bubbles">${bubbles || '<span style="font-size:10px;color:var(--ink-muted)">—</span>'}</div>
         <div class="card-right">
           <span class="card-source-count">${totalSources} source${totalSources !== 1 ? 's' : ''}</span>
-          <span class="score-badge ${scoreClass}">${sub.score ?? '—'}</span>
+          <span class="score-badge ${scoreClass}">${sub.score ?? '—'}${sigBars(sub.score)}</span>
         </div>
       </div>
 
@@ -359,7 +382,6 @@ const Kanban = (() => {
 
   function buildExpandedContent(sub) {
     const groups = [
-      { key: 'x',      label: 'X (Twitter)', iconCls: 'x-icon-sm',      icon: xLogoSvg(10) },
       { key: 'reddit', label: 'Reddit',       iconCls: 'reddit-icon-sm', icon: redditLogoSvg(10) },
       { key: 'web',    label: 'Web',          iconCls: 'web-icon-sm',    icon: webSvg(10) },
     ];
@@ -387,6 +409,9 @@ const Kanban = (() => {
                     : esc(a.title)}
                 </div>
                 <div class="expanded-article-source">${esc(a.source)}</div>
+                <button class="file-btn" title="File to dossier"
+                  data-title="${esc(a.title)}" data-url="${esc(a.url || '')}" data-source="${esc(a.source || '')}"
+                  onclick="event.stopPropagation();Dossier.fileFromButton(this)">+ FILE</button>
               </div>
             </div>`).join('')}
         </div>`;
@@ -689,7 +714,7 @@ const Kanban = (() => {
     if (!overlay || !body) return;
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
-    const totalSrc   = (sub.sources?.x?.length || 0) + (sub.sources?.reddit?.length || 0) + (sub.sources?.web?.length || 0);
+    const totalSrc   = (sub.sources?.reddit?.length || 0) + (sub.sources?.web?.length || 0);
 
     body.innerHTML = `
       <div class="fullscreen-identifier">${esc(topic?.name || 'Topic')}</div>
@@ -721,7 +746,6 @@ const Kanban = (() => {
 
   function buildFullscreenSources(sub) {
     const groups = [
-      { key: 'x',      label: 'X / Twitter' },
       { key: 'reddit', label: 'Reddit' },
       { key: 'web',    label: 'Web sources' },
     ];
@@ -1072,7 +1096,7 @@ const ColMenu = (() => {
       `Editing sources for "${topic.name}"`;
 
     renderEditTags();
-    ['x','reddit','web'].forEach(t => {
+    ['reddit','web'].forEach(t => {
       const el = document.getElementById(`edit-${t}-input`);
       if (el) el.value = '';
     });
@@ -1081,7 +1105,7 @@ const ColMenu = (() => {
   }
 
   function renderEditTags() {
-    ['x','reddit','web'].forEach(type => {
+    ['reddit','web'].forEach(type => {
       const container = document.getElementById(`edit-${type}-tags`);
       if (!container) return;
       container.innerHTML = '';
@@ -1164,3 +1188,30 @@ const ColMenu = (() => {
 })();
 
 window.ColMenu = ColMenu;
+
+
+/* ═══════════════════════════════════
+   WIRE — topbar status line
+   Fed by sourceReport after each sweep.
+   ═══════════════════════════════════ */
+const Wire = (() => {
+  function fmt(d) { return d.toTimeString().slice(0, 5); }
+  function update(report) {
+    const el = document.getElementById('wire-line');
+    if (!el || !Array.isArray(report) || report.length === 0) return;
+    const ok = report.filter(r => r.status === 'ok' || r.status === 'fallback');
+    const backend = (report.find(r => r.backend) || {}).backend || '';
+    const now = new Date();
+    const next = new Date(now.getTime() + 30 * 60000);
+    el.classList.remove('standby');
+    el.innerHTML =
+      '<span class="live"><span class="dot"></span>LIVE</span>' +
+      '<span class="sep">│</span>SWEEP ' + fmt(now) +
+      '<span class="sep">│</span>' + ok.length + '/' + report.length + ' SOURCES' +
+      (backend ? '<span class="sep">│</span>VIA ' + backend.toUpperCase() : '') +
+      '<span class="sep">│</span>NEXT ' + fmt(next);
+    el.title = report.map(r => r.source + ': ' + r.status + ' (' + r.count + ')').join('\n');
+  }
+  return { update };
+})();
+window.Wire = Wire;
