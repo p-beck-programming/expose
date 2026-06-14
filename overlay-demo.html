@@ -189,77 +189,6 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
       <!-- ── STEP 2: Sources ── -->
       <div class="overlay-step" id="step-2">
 
-        <!-- X -->
-        <div class="source-section" id="source-section-x">
-          <div class="source-section-header" onclick="Overlay.toggleSection('x')">
-            <div class="source-icon x-icon">
-              <!-- X logo -->
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-              </svg>
-            </div>
-            <span class="source-section-name">X (Twitter)</span>
-            <span class="source-section-count" id="x-count"></span>
-            <span class="source-chevron">
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="2,4 6,8 10,4"/>
-              </svg>
-            </span>
-          </div>
-          <div class="source-section-body">
-            <div class="source-type-toggle">
-              <button class="type-btn active" id="x-mode-topic" onclick="Overlay.setXMode('topic')">Topic search</button>
-              <button class="type-btn" id="x-mode-handle" onclick="Overlay.setXMode('handle')">Specific handle</button>
-            </div>
-            <div class="source-input-row">
-              <span class="source-prefix" id="x-prefix" style="display:none">@</span>
-              <input class="source-input" id="x-source-input" placeholder="e.g. AI regulation, GPT" autocomplete="off"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('x')}"/>
-              <button class="source-add-btn" onclick="Overlay.addSource('x')">+ Add</button>
-            </div>
-            <div class="saved-hint">
-              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
-              </svg>
-              Results pulled from Google-indexed X posts — no X API required
-            </div>
-            <div class="source-tags" id="x-tags"></div>
-          </div>
-        </div>
-
-        <!-- Reddit -->
-        <div class="source-section" id="source-section-reddit">
-          <div class="source-section-header" onclick="Overlay.toggleSection('reddit')">
-            <div class="source-icon reddit-icon">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/>
-              </svg>
-            </div>
-            <span class="source-section-name">Reddit</span>
-            <span class="source-section-count" id="reddit-count"></span>
-            <span class="source-chevron">
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="2,4 6,8 10,4"/>
-              </svg>
-            </span>
-          </div>
-          <div class="source-section-body">
-            <div class="source-input-row">
-              <span class="source-prefix" style="display:flex">r/</span>
-              <input class="source-input has-prefix" id="reddit-input" placeholder="worldnews, technology…" autocomplete="off"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('reddit')}"/>
-              <button class="source-add-btn" onclick="Overlay.addSource('reddit')">+ Add</button>
-            </div>
-            <div class="saved-hint">
-              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
-              </svg>
-              Results sourced from Google-indexed Reddit threads
-            </div>
-            <div class="source-tags" id="reddit-tags"></div>
-          </div>
-        </div>
-
         <!-- Websites -->
         <div class="source-section" id="source-section-web">
           <div class="source-section-header" onclick="Overlay.toggleSection('web')">
@@ -293,6 +222,66 @@ html, body { height: 100%; font-family: var(--font-body); background: var(--bg);
               Domain only — no https:// or www needed
             </div>
             <div class="source-tags" id="web-tags"></div>
+          </div>
+        </div>
+
+        <!-- RSS feed -->
+        <div class="source-section" id="source-section-rss">
+          <div class="source-section-header" onclick="Overlay.toggleSection('rss')">
+            <div class="source-icon rss-icon">
+              <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.39 12.61 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83C13.9 14.45 9.55 10.1 4 10.1z"/></svg>
+            </div>
+            <span class="source-section-name">RSS feed</span>
+            <span class="source-section-count" id="rss-count"></span>
+            <span class="source-chevron">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2,4 6,8 10,4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <input class="source-input" id="rss-input" placeholder="https://www.newschannel5.com/feed" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('rss')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('rss')">+ Add</button>
+            </div>
+            <div class="saved-hint">
+              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+              </svg>
+              Any RSS or Atom feed URL — news sites, blogs, gov/police feeds
+            </div>
+            <div class="source-tags" id="rss-tags"></div>
+          </div>
+        </div>
+
+        <!-- YouTube -->
+        <div class="source-section" id="source-section-youtube">
+          <div class="source-section-header" onclick="Overlay.toggleSection('youtube')">
+            <div class="source-icon youtube-icon">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3.02 3.02 0 0 0-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.51A3.02 3.02 0 0 0 .5 6.2C0 8.07 0 12 0 12s0 3.93.5 5.8a3.02 3.02 0 0 0 2.12 2.14c1.88.51 9.38.51 9.38.51s7.5 0 9.38-.51a3.02 3.02 0 0 0 2.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.8zM9.6 15.6V8.4l6.2 3.6-6.2 3.6z"/></svg>
+            </div>
+            <span class="source-section-name">YouTube</span>
+            <span class="source-section-count" id="youtube-count"></span>
+            <span class="source-chevron">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2,4 6,8 10,4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="source-section-body">
+            <div class="source-input-row">
+              <input class="source-input" id="youtube-input" placeholder="@NewsChannel5 or channel URL" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('youtube')}"/>
+              <button class="source-add-btn" onclick="Overlay.addSource('youtube')">+ Add</button>
+            </div>
+            <div class="saved-hint">
+              <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/>
+              </svg>
+              A @handle, channel URL, or UC… channel id
+            </div>
+            <div class="source-tags" id="youtube-tags"></div>
           </div>
         </div>
 
@@ -406,7 +395,7 @@ document.addEventListener('topic:created', e => {
 
   const item = document.createElement('div');
   item.className = 'topic-log-item';
-  const srcCount = topic.sources.x.length + topic.sources.reddit.length + topic.sources.web.length;
+  const srcCount = topic.sources.web.length + (topic.sources.rss || []).length + (topic.sources.youtube || []).length;
   const srcNote  = topic.allSourcesEnabled ? `${srcCount} sources + broad web` : `${srcCount} source${srcCount !== 1 ? 's' : ''}`;
   item.innerHTML = `
     <div class="topic-log-name">${topic.name}</div>

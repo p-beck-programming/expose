@@ -22,12 +22,14 @@ expose/
 ├── js/
 │   ├── auth.service.js     ← Auth logic (localStorage → swap for API)
 │   ├── topic.service.js    ← Topic CRUD (localStorage → swap for API)
-│   ├── gemini.service.js   ← Gemini API calls, search grounding
+│   ├── gemini.service.js   ← Gemini API calls, source pipeline
 │   ├── kanban.js           ← Kanban render, drag/drop, card logic
 │   ├── topic-overlay.js    ← Topic creation overlay
 │   ├── dashboard.js        ← Dashboard init, event wiring
 │   ├── router.js           ← Client-side routing, auth guards
 │   └── theme.js            ← Theme toggle, persisted preference
+├── worker/
+│   └── expose-proxy.js     ← Cloudflare Worker (deploy separately — see below)
 └── assets/
     └── favicon.svg         ← Brand mark as SVG favicon
 ```
@@ -50,6 +52,42 @@ npx serve expose
 # Option C — VS Code
 Install "Live Server" extension → right-click index.html → Open with Live Server
 ```
+
+---
+
+## Cloudflare Worker: expose-proxy
+
+The app depends on a Cloudflare Worker that acts as a CORS proxy and fetch gateway.
+It lives at `worker/expose-proxy.js` and must be deployed separately from the static site.
+
+### What it does
+
+| `?type=` | What it fetches | Auth needed |
+|----------|----------------|-------------|
+| `news`   | Google News RSS → GDELT DOC 2.0 fallback | None |
+| `rss`    | Any RSS or Atom feed URL (`&url=…`) | None |
+| `youtube`| Per-channel YouTube Atom feed (`&channel=…`) | None |
+
+### Deploy / update the Worker
+
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → Workers & Pages → your Worker (`expose-proxy`)
+2. Click **Edit code** → paste the contents of `worker/expose-proxy.js` → **Deploy**
+3. No secrets or environment variables are required — all sources are keyless.
+
+### Verify after deploy
+
+```
+# News (Google News RSS → GDELT fallback)
+https://expose-proxy.pbeckman731.workers.dev/?type=news&q=nashville&when=3d
+
+# RSS feed
+https://expose-proxy.pbeckman731.workers.dev/?type=rss&url=https%3A%2F%2Fwww.newschannel5.com%2Ffeed
+
+# YouTube channel
+https://expose-proxy.pbeckman731.workers.dev/?type=youtube&channel=%40NewsChannel5
+```
+
+Each should return `{"ok":true,"items":[...]}`.
 
 ---
 
@@ -248,6 +286,8 @@ Targets modern browsers only (no IE). Requirements:
 ## Production Checklist
 
 Before going live with real users:
+- [ ] Deploy `worker/expose-proxy.js` to Cloudflare Workers (paste + Deploy in dashboard)
+- [ ] Verify Worker endpoints return `ok:true` for news, rss, and youtube types
 - [ ] Move Gemini API key to a server-side proxy
 - [ ] Replace localStorage auth with a real auth provider
 - [ ] Add HTTPS (required — Gemini API blocks non-HTTPS origins)

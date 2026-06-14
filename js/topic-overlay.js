@@ -29,8 +29,8 @@ const Overlay = (() => {
   let currentStep = 1;
   const totalSteps = 2;
 
-  // Sources per type: { x: [], reddit: [], web: [] }
-  let sources = { x: [], reddit: [], web: [] };
+  // Sources per type: { web: [], rss: [], youtube: [] }
+  let sources = { web: [], rss: [], youtube: [] };
   let allSourcesEnabled = false;
 
   /* ── DOM refs (resolved at open time) ── */
@@ -65,13 +65,13 @@ const Overlay = (() => {
   /* ── Reset ── */
   function reset() {
     currentStep = 1;
-    sources = { x: [], reddit: [], web: [] };
+    sources = { web: [], rss: [], youtube: [] };
     allSourcesEnabled = false;
 
     // Clear inputs
     const nameInput = $('topic-name-input');
     if (nameInput) { nameInput.value = ''; nameInput.classList.remove('error'); }
-    ['reddit-input', 'web-input'].forEach(id => {
+    ['web-input', 'rss-input', 'youtube-input'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
     // Reset toggle
@@ -153,7 +153,7 @@ const Overlay = (() => {
     const btn = $('overlay-next-btn');
 
     // Require at least one source or all-sources enabled
-    const totalSources = sources.x.length + sources.reddit.length + sources.web.length;
+    const totalSources = sources.web.length + sources.rss.length + sources.youtube.length;
     const hint = $('no-sources-hint');
     if (totalSources === 0 && !allSourcesEnabled) {
       if (hint) { hint.style.display = 'flex'; }
@@ -186,12 +186,7 @@ const Overlay = (() => {
   /* ── Source management ── */
   function addSource(type) {
     let value = '';
-    if (type === 'reddit') {
-      const raw = $('reddit-input')?.value?.trim().replace(/^r\//, '');
-      if (!raw) return;
-      value = 'r/' + raw;
-      if ($('reddit-input')) $('reddit-input').value = '';
-    } else if (type === 'web') {
+    if (type === 'web') {
       // Accept anything: full URLs (https://…), bare domains, with or without paths.
       const raw = $('web-input')?.value?.trim()
         .replace(/^https?:\/\//i, '').replace(/^www\./, '')
@@ -199,6 +194,18 @@ const Overlay = (() => {
       if (!raw) return;
       value = raw;
       if ($('web-input')) $('web-input').value = '';
+    } else if (type === 'rss') {
+      // Require a full feed URL so the Worker can fetch it directly.
+      const raw = $('rss-input')?.value?.trim();
+      if (!raw) return;
+      value = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+      if ($('rss-input')) $('rss-input').value = '';
+    } else if (type === 'youtube') {
+      // Accept @handle, channel URL, or UC… id — the Worker resolves it.
+      const raw = $('youtube-input')?.value?.trim();
+      if (!raw) return;
+      value = raw;
+      if ($('youtube-input')) $('youtube-input').value = '';
     }
     if (!value) return;
     if (sources[type].includes(value)) return; // no duplicates
@@ -237,7 +244,7 @@ const Overlay = (() => {
   }
 
   function updateSourceCounts() {
-    const counts = { x: sources.x.length, reddit: sources.reddit.length, web: sources.web.length };
+    const counts = { web: sources.web.length, rss: sources.rss.length, youtube: sources.youtube.length };
     Object.entries(counts).forEach(([type, count]) => {
       const el = $(`${type}-count`);
       if (el) el.textContent = count > 0 ? count : '';

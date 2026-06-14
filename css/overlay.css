@@ -86,9 +86,11 @@
   display:flex; align-items:center; justify-content:center; color:var(--dim);
 }
 .source-icon svg { width:13px; height:13px; }
-.source-icon.reddit-icon { color:#D89A8C; }
-.source-icon.reddit-icon svg { fill:currentColor; }
 .source-icon.web-icon { color:var(--acc-hi); }
+.source-icon.rss-icon { color:#E0A66A; }
+.source-icon.rss-icon svg { fill:currentColor; }
+.source-icon.youtube-icon { color:#D9777A; }
+.source-icon.youtube-icon svg { fill:currentColor; }
 .source-section-name { font-family:var(--font-ui); font-weight:600; font-size:12px; letter-spacing:.1em; text-transform:uppercase; flex:1; }
 .source-section-count { font-family:var(--font-mono); font-size:11px; color:var(--acc-hi); }
 .source-chevron { color:var(--faint); display:flex; transition:transform .2s; }

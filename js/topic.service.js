@@ -59,7 +59,7 @@ const TopicService = (() => {
     const topic = {
       id:               uid(),
       name:             data.name,
-      sources:          data.sources || { x: [], reddit: [], web: [] },
+      sources:          data.sources || { web: [], rss: [], youtube: [] },
       allSourcesEnabled:!!data.allSourcesEnabled,
       pinned:           false,
       createdAt:        new Date().toISOString(),
@@ -131,7 +131,7 @@ const TopicService = (() => {
         summary:     s.summary,
         score:       s.score,
         sourceCount: s.sourceCount,
-        sources:     s.sources || { x: [], reddit: [], web: [] },
+        sources:     s.sources || { web: [], rss: [], youtube: [] },
         broadSources:s.broadSources || [],
         viewed:      prev.viewed || false,
         pinned:      prev.pinned || false,

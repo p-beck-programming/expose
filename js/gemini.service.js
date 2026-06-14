@@ -8,7 +8,7 @@
 
    v3 splits the jobs:
      1. FETCH  — real items come from the Exposé Cloudflare Worker
-                 (Google News RSS per source + Reddit best-effort).
+                 (Google News RSS per source + user RSS/YouTube feeds).
                  Every URL originates from a live feed.
      2. CLUSTER — Gemini (NO tools, NO grounding) only groups the
                  fetched items by ID. It never sees or emits URLs.
@@ -18,9 +18,9 @@
    Kept from v2 (same public contract — kanban.js unchanged):
      - fetchSubtopics(topic) → { success, subtopics, fromCache }
      - subtopic shape: { id, name, summary, score, sourceCount,
-       sources: { x, reddit, web }, broadSources, groundingChunks }
-       (x is always [] — X support removed. groundingChunks is
-       always [] — kanban renders nothing for both. No UI edits.)
+       sources: { web, rss, youtube }, broadSources, groundingChunks }
+       (groundingChunks is always [] — grounding removed; kanban
+       renders nothing for empty groups.)
      - 30-minute cache guard, source rotation, MAX_SUBTOPICS = 3,
        MAX_SOURCES = 6, query logging via TopicService.appendLog.
 
@@ -74,10 +74,15 @@ const GeminiService = (() => {
     return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${PER_QUERY}`;
   }
 
+  function _host(u) {
+    try { return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, ''); }
+    catch { return String(u); }
+  }
+
   /* Build one Worker request per rotated source.
      web domains → Google News site: query
-     reddit subs → Worker's reddit endpoint
-     x handles   → skipped (X support removed)            */
+     rss feeds   → Worker's rss endpoint (any feed URL)
+     youtube     → Worker's youtube endpoint (channel id / @handle / url) */
   function _buildPlans(topicName, rotated, includeBroad) {
     const plans = [];
     (rotated.web || []).forEach(domain => {
@@ -86,10 +91,15 @@ const GeminiService = (() => {
       if (d) plans.push({ label: d, kind: 'news', query: `${topicName} site:${d}`,
                           url: _newsUrl(`${topicName} site:${d}`) });
     });
-    (rotated.reddit || []).forEach(sub => {
-      const s = String(sub).trim().replace(/^\/+/, '').replace(/^r\//i, '').replace(/\/+$/, '');
-      if (s) plans.push({ label: `r/${s}`, kind: 'reddit', query: `r/${s}`,
-                          url: `${PROXY}/?type=reddit&sub=${encodeURIComponent(s)}&limit=${PER_QUERY}` });
+    (rotated.rss || []).forEach(feed => {
+      const u = String(feed).trim();
+      if (u) plans.push({ label: _host(u), kind: 'rss', query: u,
+                          url: `${PROXY}/?type=rss&url=${encodeURIComponent(u)}&limit=${PER_QUERY}` });
+    });
+    (rotated.youtube || []).forEach(ch => {
+      const c = String(ch).trim();
+      if (c) plans.push({ label: c, kind: 'youtube', query: c,
+                          url: `${PROXY}/?type=youtube&channel=${encodeURIComponent(c)}&limit=${PER_QUERY}` });
     });
     if (includeBroad || plans.length === 0) {
       plans.push({ label: '(broad search)', kind: 'news', query: topicName,
@@ -108,7 +118,6 @@ const GeminiService = (() => {
     const sourceReport = [];
     const queriesUsed  = [];
     let   all          = [];
-    let   redditFellBack = false;
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
@@ -117,25 +126,14 @@ const GeminiService = (() => {
 
       if (body && body.ok) {
         sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length, backend: body.backend || '' });
+        // Tag each item with the plan kind so bucketing is reliable downstream.
+        body.items.forEach(it => { it._kind = plan.kind; });
         all = all.concat(body.items);
         continue;
       }
 
       const reason = body ? body.error : 'network_error';
-      sourceReport.push({ source: plan.label, status: reason, count: 0 });
-
-      // Reddit blocked → one thin fallback through Google's index.
-      if (plan.kind === 'reddit' && !redditFellBack) {
-        redditFellBack = true;
-        try {
-          const fb = await fetch(_newsUrl(`${topicName} site:reddit.com`)).then(r => r.json());
-          if (fb.ok && fb.items.length) {
-            fb.items.forEach(it => { if (!it.source) it.source = 'reddit (via Google)'; });
-            all = all.concat(fb.items);
-            sourceReport.push({ source: 'reddit (via Google)', status: 'fallback', count: fb.items.length });
-          }
-        } catch { /* fallback is best-effort by definition */ }
-      }
+      sourceReport.push({ source: plan.label, status: reason, count: 0, detail: body?.detail || '' });
     }
 
     // Dedupe (same story arrives via multiple queries), newest first, cap.
@@ -237,20 +235,23 @@ Rules:
   }
 
   /* ── Bucket validated items into the kanban source shape ──
-     reddit items → sources.reddit, everything else → sources.web,
-     sources.x stays [] (kanban skips empty groups). Caps at
-     MAX_SOURCES total: up to 2 reddit, remainder web.            */
+     by the _kind stamped during fetch: youtube → sources.youtube,
+     rss → sources.rss, everything else → sources.web (kanban skips
+     empty groups). Caps at MAX_SOURCES total across all buckets,
+     preserving the (date-sorted) order.                           */
   function _toSourceBuckets(linkedItems) {
-    const isReddit = it => it.sourceDomain === 'reddit.com' || /^r\//i.test(it.source || '');
     const art = it => ({
       title:       it.title,
       source:      it.source || it.sourceDomain || 'web',
       url:         it.url || '',
       publishedAt: it.publishedAt || '',
     });
-    const reddit = linkedItems.filter(isReddit).slice(0, 2).map(art);
-    const web    = linkedItems.filter(it => !isReddit(it)).slice(0, MAX_SOURCES - reddit.length).map(art);
-    return { x: [], reddit, web };
+    const buckets = { web: [], rss: [], youtube: [] };
+    for (const it of linkedItems.slice(0, MAX_SOURCES)) {
+      const key = it._kind === 'youtube' ? 'youtube' : it._kind === 'rss' ? 'rss' : 'web';
+      buckets[key].push(art(it));
+    }
+    return buckets;
   }
 
   /* ════════════════════════════════════════════
@@ -293,7 +294,9 @@ Rules:
     console.debug('[Exposé] source report:', sourceReport);
 
     if (items.length === 0) {
-      const dead = sourceReport.filter(r => r.count === 0).map(r => `${r.source} (${r.status})`).join(', ');
+      // per-source failure detail surfaced for diagnosability
+      const dead = sourceReport.filter(r => r.count === 0)
+        .map(r => `${r.source} (${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ');
       return {
         success: false,
         error:   'NO_RESULTS',
@@ -334,7 +337,7 @@ Rules:
           summary:         String(st.summary || ''),
           score:           Number.isFinite(st.score) ? st.score : 50,
           sources,
-          sourceCount:     sources.reddit.length + sources.web.length,
+          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length,
           broadSources:    [],
           groundingChunks: [], // grounding removed — kanban renders nothing for []
         };
@@ -355,7 +358,7 @@ Rules:
           subtopics' own sources, from the broad query, top 4. ── */
     if (topic.allSourcesEnabled) {
       const usedTitles = new Set(
-        subtopics.flatMap(s => [...s.sources.reddit, ...s.sources.web]).map(a => a.title)
+        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube]).map(a => a.title)
       );
       subtopics[0].broadSources = items
         .filter(it => !usedTitles.has(it.title))
@@ -381,32 +384,25 @@ Rules:
     };
   }
 
-  /* ── Source rotation (kept from v2, X filtered out) ──
+  /* ── Source rotation ──
      Distributes MAX_SOURCES query slots across the user's
-     reddit + web sources, rotating the window each refresh
-     so every source gets coverage over time.              */
+     web + rss + youtube sources, rotating the window each
+     refresh so every source gets coverage over time.       */
+  const SOURCE_KINDS = ['web', 'rss', 'youtube'];
+
   function _getRotatedSources(sources, offset) {
-    const reddit = sources.reddit || [];
-    const web    = sources.web    || [];
-    const total  = reddit.length + web.length;
+    const all = SOURCE_KINDS.flatMap(type =>
+      (sources[type] || []).map(value => ({ type, value }))
+    );
+    const total = all.length;
 
-    if (total <= MAX_SOURCES) return { reddit, web };
+    const pickWindow = total <= MAX_SOURCES
+      ? all
+      : Array.from({ length: MAX_SOURCES }, (_, i) => all[(offset % total + i) % total]);
 
-    const all = [
-      ...reddit.map(v => ({ type: 'reddit', value: v })),
-      ...web.map(v    => ({ type: 'web',    value: v })),
-    ];
-
-    const start  = offset % total;
-    const window = [];
-    for (let i = 0; i < MAX_SOURCES; i++) {
-      window.push(all[(start + i) % total]);
-    }
-
-    return {
-      reddit: window.filter(s => s.type === 'reddit').map(s => s.value),
-      web:    window.filter(s => s.type === 'web').map(s => s.value),
-    };
+    const out = { web: [], rss: [], youtube: [] };
+    pickWindow.forEach(s => out[s.type].push(s.value));
+    return out;
   }
 
   /* ── Human-readable error messages ── */
