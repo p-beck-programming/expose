@@ -41,6 +41,11 @@ const TopicService = (() => {
   }
   function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
   function uid() { return '_' + Math.random().toString(36).slice(2, 10); }
+  // Subtopic cap: default 3, clamped to 2–6
+  function clampSubs(n) {
+    const v = Math.round(Number(n));
+    return Number.isFinite(v) ? Math.max(2, Math.min(6, v)) : 3;
+  }
 
   /* ════════════════════════════════
      TOPICS
@@ -60,6 +65,8 @@ const TopicService = (() => {
       id:               uid(),
       name:             data.name,
       sources:          data.sources || { web: [], rss: [], youtube: [] },
+      strictMode:       !!data.strictMode,
+      maxSubtopics:     clampSubs(data.maxSubtopics),
       allSourcesEnabled:!!data.allSourcesEnabled,
       pinned:           false,
       createdAt:        new Date().toISOString(),

@@ -949,6 +949,10 @@ const ColMenu = (() => {
   let _pendingAction = null; // { type, topicId }
   let _editTopicId   = null;
   let _editSources   = { web: [], rss: [], youtube: [] };
+  let _editStrict    = false;
+  let _editBroad     = false;
+  let _editMaxSubs   = 3;
+  const EDIT_SUBS_MIN = 2, EDIT_SUBS_MAX = 6;
   let _pendingRerun = null; // { query, topicName }
 
   function showRerunConfirm(query) {
@@ -1098,17 +1102,57 @@ const ColMenu = (() => {
       rss:     [...(topic.sources?.rss     || [])],
       youtube: [...(topic.sources?.youtube || [])],
     };
+    _editStrict  = !!topic.strictMode;
+    _editBroad   = !!topic.allSourcesEnabled;
+    _editMaxSubs = Math.max(EDIT_SUBS_MIN, Math.min(EDIT_SUBS_MAX, Math.round(Number(topic.maxSubtopics)) || 3));
 
     document.getElementById('edit-sources-topic-name').textContent =
       `Editing sources for "${topic.name}"`;
 
     renderEditTags();
+    syncEditStrictUI();
+    syncEditBroadUI();
+    syncEditStepperUI();
     ['web','rss','youtube'].forEach(t => {
       const el = document.getElementById(`edit-${t}-input`);
       if (el) el.value = '';
     });
 
     document.getElementById('edit-sources-backdrop')?.classList.add('open');
+  }
+
+  function toggleEditStrict() {
+    _editStrict = !_editStrict;
+    if (_editStrict && _editBroad) { _editBroad = false; syncEditBroadUI(); }
+    syncEditStrictUI();
+  }
+
+  function toggleEditBroad() {
+    _editBroad = !_editBroad;
+    if (_editBroad && _editStrict) { _editStrict = false; syncEditStrictUI(); }
+    syncEditBroadUI();
+  }
+
+  function stepEditSubtopics(delta) {
+    _editMaxSubs = Math.max(EDIT_SUBS_MIN, Math.min(EDIT_SUBS_MAX, _editMaxSubs + delta));
+    syncEditStepperUI();
+  }
+
+  function syncEditStrictUI() {
+    document.getElementById('edit-strict-toggle')?.classList.toggle('on', _editStrict);
+    document.getElementById('edit-strict-row')?.classList.toggle('enabled', _editStrict);
+  }
+  function syncEditBroadUI() {
+    document.getElementById('edit-broad-toggle')?.classList.toggle('on', _editBroad);
+    document.getElementById('edit-broad-block')?.classList.toggle('enabled', _editBroad);
+  }
+  function syncEditStepperUI() {
+    const val = document.getElementById('edit-subtopic-count-value');
+    if (val) val.textContent = _editMaxSubs;
+    const minus = document.getElementById('edit-subtopic-minus');
+    const plus  = document.getElementById('edit-subtopic-plus');
+    if (minus) minus.disabled = _editMaxSubs <= EDIT_SUBS_MIN;
+    if (plus)  plus.disabled  = _editMaxSubs >= EDIT_SUBS_MAX;
   }
 
   function renderEditTags() {
@@ -1160,7 +1204,12 @@ const ColMenu = (() => {
 
   async function saveEditSources() {
     if (!_editTopicId) return;
-    await TopicService.updateTopic(_editTopicId, { sources: { ..._editSources } });
+    await TopicService.updateTopic(_editTopicId, {
+      sources:           { ..._editSources },
+      strictMode:        _editStrict,
+      allSourcesEnabled: _editBroad,
+      maxSubtopics:      _editMaxSubs,
+    });
     closeEditSources();
     // Re-render the column to reflect source changes
     Kanban.renderColumn(_editTopicId);
@@ -1185,6 +1234,9 @@ const ColMenu = (() => {
     closeEditSources,
     handleEditBackdropClick,
     saveEditSources,
+    toggleEditStrict,
+    toggleEditBroad,
+    stepEditSubtopics,
     showRerunConfirm,
     showConfirm,
     _outsideClick,

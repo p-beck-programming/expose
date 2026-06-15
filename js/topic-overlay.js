@@ -32,6 +32,9 @@ const Overlay = (() => {
   // Sources per type: { web: [], rss: [], youtube: [] }
   let sources = { web: [], rss: [], youtube: [] };
   let allSourcesEnabled = false;
+  let strictMode = false;       // only return items from the listed web sites
+  let maxSubtopics = 3;         // per-topic subtopic cap (2–6)
+  const SUBS_MIN = 2, SUBS_MAX = 6;
 
   /* ── DOM refs (resolved at open time) ── */
   const $ = id => document.getElementById(id);
@@ -74,12 +77,13 @@ const Overlay = (() => {
     ['web-input', 'rss-input', 'youtube-input'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
-    // Reset toggle
-    const toggle = $('all-sources-toggle');
-    if (toggle) toggle.classList.remove('on');
-    const block = $('all-sources-block');
-    if (block) block.classList.remove('enabled');
+    // Reset toggles + stepper
     allSourcesEnabled = false;
+    strictMode = false;
+    maxSubtopics = 3;
+    syncBroadUI();
+    syncStrictUI();
+    syncStepperUI();
 
     // Collapse all source sections
     document.querySelectorAll('.source-section').forEach(s => s.classList.remove('expanded'));
@@ -172,6 +176,8 @@ const Overlay = (() => {
       name: $('topic-name-input')?.value?.trim(),
       sources,
       allSourcesEnabled,
+      strictMode,
+      maxSubtopics,
     });
 
     if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
@@ -262,10 +268,42 @@ const Overlay = (() => {
 
   function toggleAllSources() {
     allSourcesEnabled = !allSourcesEnabled;
+    // Strict ("only my sites") and broad ("search beyond my sites") are opposites.
+    if (allSourcesEnabled && strictMode) { strictMode = false; syncStrictUI(); }
+    syncBroadUI();
+  }
+
+  function toggleStrict() {
+    strictMode = !strictMode;
+    if (strictMode && allSourcesEnabled) { allSourcesEnabled = false; syncBroadUI(); }
+    syncStrictUI();
+  }
+
+  function stepSubtopics(delta) {
+    maxSubtopics = Math.max(SUBS_MIN, Math.min(SUBS_MAX, maxSubtopics + delta));
+    syncStepperUI();
+  }
+
+  /* ── UI sync helpers ── */
+  function syncBroadUI() {
     const toggle = $('all-sources-toggle');
     const block  = $('all-sources-block');
     if (toggle) toggle.classList.toggle('on', allSourcesEnabled);
     if (block)  block.classList.toggle('enabled', allSourcesEnabled);
+  }
+  function syncStrictUI() {
+    const toggle = $('strict-toggle');
+    const row    = $('strict-row');
+    if (toggle) toggle.classList.toggle('on', strictMode);
+    if (row)    row.classList.toggle('enabled', strictMode);
+  }
+  function syncStepperUI() {
+    const val = $('subtopic-count-value');
+    if (val) val.textContent = maxSubtopics;
+    const minus = $('subtopic-minus');
+    const plus  = $('subtopic-plus');
+    if (minus) minus.disabled = maxSubtopics <= SUBS_MIN;
+    if (plus)  plus.disabled  = maxSubtopics >= SUBS_MAX;
   }
 
   function setSuggestion(text) {
@@ -286,7 +324,7 @@ const Overlay = (() => {
   }
 
   /* ── Public API ── */
-  return { open, close, goToStep2, submit, addSource, removeSource, toggleSection, toggleAllSources, setSuggestion, updateCharCount };
+  return { open, close, goToStep2, submit, addSource, removeSource, toggleSection, toggleAllSources, toggleStrict, stepSubtopics, setSuggestion, updateCharCount };
 })();
 
 /* Expose globally for inline onclick handlers */

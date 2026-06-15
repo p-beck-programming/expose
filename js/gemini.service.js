@@ -47,7 +47,9 @@ const GeminiService = (() => {
   const MODEL         = 'gemini-2.5-flash-lite';
   const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
   const MAX_SOURCES   = 6;    // hard cap on total sources per subtopic
-  const MAX_SUBTOPICS = 3;    // fixed subtopic count per refresh
+  const MAX_SUBTOPICS = 3;    // default subtopic count per refresh (per-topic override 2–6)
+  const MIN_SUBTOPICS = 2;    // floor for the per-topic subtopic cap
+  const MAX_SUBTOPICS_CAP = 6;// ceiling for the per-topic subtopic cap
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
   const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
   const PER_QUERY     = 8;    // items requested per source query
@@ -77,6 +79,30 @@ const GeminiService = (() => {
   function _host(u) {
     try { return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, ''); }
     catch { return String(u); }
+  }
+
+  // Subtopic cap: default MAX_SUBTOPICS, clamped to MIN_SUBTOPICS…MAX_SUBTOPICS_CAP
+  function _clampSubs(n) {
+    const v = Math.round(Number(n));
+    return Number.isFinite(v) ? Math.max(MIN_SUBTOPICS, Math.min(MAX_SUBTOPICS_CAP, v)) : MAX_SUBTOPICS;
+  }
+
+  // Normalize a domain string the same way _buildPlans does for web sources.
+  function _normDomain(d) {
+    return String(d || '').trim().toLowerCase()
+      .replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+  // An item's domain, falling back to parsing its URL host.
+  function _domainOf(it) {
+    return _normDomain(it.sourceDomain || (it.url ? _host(it.url) : ''));
+  }
+  // Strict mode: item domain must equal, or be a subdomain of, a listed web domain.
+  function _isAllowedDomain(itemDomain, webList) {
+    if (!itemDomain) return false;
+    return (webList || []).some(src => {
+      const b = _normDomain(src);
+      return b && (itemDomain === b || itemDomain.endsWith('.' + b));
+    });
   }
 
   /* Build one Worker request per rotated source.
@@ -211,7 +237,7 @@ const GeminiService = (() => {
     return null;
   }
 
-  function _clusterPrompt(topicName, items) {
+  function _clusterPrompt(topicName, items, cap = MAX_SUBTOPICS) {
     const lines = items.map(it => {
       const date = (it.publishedAt || '').slice(0, 10);
       const snip = it.snippet ? ` | ${it.snippet.slice(0, 150)}` : '';
@@ -224,7 +250,7 @@ Each line: ID | source | date | title | optional snippet.
 
 ${lines}
 
-Group these into at most ${MAX_SUBTOPICS} emerging subtopics (distinct stories or developments).
+Group these into at most ${cap} emerging subtopics (distinct stories or developments).
 
 Rules:
 - Respond with ONLY valid JSON. No markdown, no commentary, no code fences.
@@ -290,8 +316,12 @@ Rules:
     } catch (err) {
       return { success: false, error: 'PROXY_ERROR', message: _friendlyError('PROXY_ERROR') };
     }
-    const { items, sourceReport, queriesUsed } = fetched;
+    let { items } = fetched;
+    const { sourceReport, queriesUsed } = fetched;
     console.debug('[Exposé] source report:', sourceReport);
+
+    /* ── Per-topic subtopic cap (default 3, clamped 2–6) ── */
+    const cap = _clampSubs(topic.maxSubtopics);
 
     if (items.length === 0) {
       // per-source failure detail surfaced for diagnosability
@@ -304,10 +334,26 @@ Rules:
       };
     }
 
+    /* ── STRICT MODE: drop web items whose domain isn't in topic.sources.web.
+          rss/youtube items come from user-named feeds, so they always pass.
+          Filtering before clustering keeps Gemini from forming subtopics
+          around disallowed sources. ── */
+    if (topic.strictMode) {
+      const webList = (topic.sources && topic.sources.web) || [];
+      items = items.filter(it => it._kind !== 'news' || _isAllowedDomain(_domainOf(it), webList));
+      if (items.length === 0) {
+        return {
+          success: false,
+          error:   'NO_RESULTS',
+          message: `No items from your listed sites in the last 72h (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
+        };
+      }
+    }
+
     /* ── STAGE 2: cluster by ID ── */
     let text;
     try {
-      text = await _callGemini(_clusterPrompt(topic.name, items));
+      text = await _callGemini(_clusterPrompt(topic.name, items, cap));
     } catch (err) {
       return { success: false, error: err.message, message: _friendlyError(err.message) };
     }
@@ -344,7 +390,7 @@ Rules:
       })
       .filter(Boolean)
       .sort((a, b) => (b.score || 0) - (a.score || 0))
-      .slice(0, MAX_SUBTOPICS);
+      .slice(0, cap);
 
     if (subtopics.length === 0) {
       return {
