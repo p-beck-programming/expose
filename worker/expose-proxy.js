@@ -58,6 +58,32 @@ async function handleNews(url) {
 
   const when = (url.searchParams.get("when") || "").trim();
   const limit = clampInt(url.searchParams.get("limit"), 10, 1, 30);
+  const merge = url.searchParams.get("merge") === "1";
+
+  // MERGE MODE (broad search): query both backends in parallel and union the
+  // results, so broad search is a deep, source-diverse discovery tool that
+  // survives one backend being rate-limited. Each backend pulls the full limit;
+  // we dedupe and re-cap after merging.
+  if (merge) {
+    const [g, d] = await Promise.allSettled([
+      fetchGoogleNews(q, when, limit),
+      fetchGdelt(q, when, limit),
+    ]);
+    const ok = [g, d].filter(r => r.status === "fulfilled" && r.value.ok).map(r => r.value);
+    if (ok.length) {
+      const merged = dedupeItems(ok.flatMap(r => r.items))
+        .sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""))
+        .slice(0, limit);
+      return json({
+        ok: true, type: "news", backend: ok.map(r => r.backend).join("+"),
+        query: q, fetchedAt: new Date().toISOString(), items: merged,
+      });
+    }
+    const failures = [g, d].map(r =>
+      r.status === "fulfilled" ? `${r.value.backend}: ${r.value.detail}` : `news: ${String(r.reason)}`
+    );
+    return json({ ok: false, type: "news", query: q, error: "upstream_error", detail: failures.join(" | ") });
+  }
 
   const backends = PRIMARY === "gdelt"
     ? [fetchGdelt, fetchGoogleNews]
@@ -79,6 +105,21 @@ async function handleNews(url) {
   });
 }
 
+// Dedupe items by resolved URL (host+path) when available, else by normalized title.
+function dedupeItems(items) {
+  const seen = new Set();
+  const out = [];
+  for (const it of items) {
+    const key = (it.url || "")
+      ? (hostOf(it.url) + "|" + (it.title || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim())
+      : (it.title || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
 /* ---------------- backend 1: Google News RSS ---------------- */
 
 async function fetchGoogleNews(q, when, limit) {
@@ -89,7 +130,7 @@ async function fetchGoogleNews(q, when, limit) {
 
   let res;
   try {
-    res = await fetch(feedUrl, { headers: BROWSER_HEADERS });
+    res = await fetchWithRetry(feedUrl, { headers: BROWSER_HEADERS });
   } catch (err) {
     return { ok: false, backend: "google", detail: String(err) };
   }
@@ -150,7 +191,7 @@ async function fetchGdelt(q, when, limit) {
   let res;
   try {
     // GDELT rejects/rate-limits requests without a User-Agent.
-    res = await fetch(apiUrl, { headers: BROWSER_HEADERS });
+    res = await fetchWithRetry(apiUrl, { headers: BROWSER_HEADERS });
   } catch (err) {
     return { ok: false, backend: "gdelt", detail: String(err) };
   }
@@ -406,6 +447,27 @@ function decodeGoogleLink(link) {
 }
 
 /* ================= small helpers ================= */
+
+// Transient upstream statuses (429/502/503/504) and network errors are retried
+// with jittered backoff. Both news backends rate-limit intermittently, which
+// otherwise sinks broad-only topics that depend on a single news query.
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+async function fetchWithRetry(url, opts, { retries = 2, baseMs = 400 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, baseMs * attempt + Math.floor(Math.random() * 250)));
+    }
+    try {
+      const res = await fetch(url, opts);
+      if (res.ok || !RETRYABLE_STATUS.has(res.status) || attempt === retries) return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === retries) throw err;
+    }
+  }
+  if (lastErr) throw lastErr;
+}
 
 function hashId(s) {
   let h = 5381;

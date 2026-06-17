@@ -356,6 +356,12 @@ const Kanban = (() => {
             onclick="event.stopPropagation();Kanban.togglePin('${topicId}', '${sub.id}', ${sub.pinned})">
             ${pinIcon(11)}
           </button>
+          <button class="card-action-btn remove-btn" title="Remove subtopic"
+            onclick="event.stopPropagation();ColMenu.confirmRemoveSubtopic('${topicId}', '${sub.id}')">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2,3 10,3"/><path d="M4.5 3V2h3v1"/><path d="M3.5 3l.5 7h4l.5-7"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="card-meta-row">
@@ -613,6 +619,20 @@ const Kanban = (() => {
     const topic = topics.find(t => t.id === topicId);
     if (topic) topic.subtopics = topic.subtopics.filter(s => s.id !== subtopicId);
     document.getElementById(`tomb-${subtopicId}`)?.remove();
+  }
+
+  // Permanently remove a single subtopic (blocklisted so it won't regenerate).
+  // Called from the confirm dialog (ColMenu.confirmRemoveSubtopic).
+  async function removeSubtopic(topicId, subtopicId) {
+    const res = await TopicService.dismissSubtopic(topicId, subtopicId);
+    const topic = topics.find(t => t.id === topicId);
+    if (topic) {
+      topic.subtopics = (topic.subtopics || []).filter(s => s.id !== subtopicId);
+      // keep the in-memory blocklist in sync with the persisted copy
+      if (res?.topic) topic.dismissedSubtopics = res.topic.dismissedSubtopics;
+    }
+    renderColumn(topicId);
+    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
   }
 
   async function refreshCard(topicId) {
@@ -926,6 +946,7 @@ const Kanban = (() => {
     toggleCard,
     togglePin,
     dismissTombstone,
+    removeSubtopic,
     refreshCard,
     openColMenu,
     openFullscreen,
@@ -1031,6 +1052,22 @@ const ColMenu = (() => {
     });
   }
 
+  /* ── Remove a single subtopic (persistent) — show confirm ── */
+  async function confirmRemoveSubtopic(topicId, subtopicId) {
+    const topics = await TopicService.getTopics();
+    const topic  = Array.isArray(topics) ? topics.find(t => t.id === topicId) : null;
+    const sub    = topic?.subtopics?.find(s => s.id === subtopicId);
+    const name   = sub?.name || 'this subtopic';
+    _pendingAction = { type: 'removeSubtopic', topicId, subtopicId };
+    showConfirm({
+      icon:        'danger',
+      title:       'Remove subtopic?',
+      body:        `<strong>${esc(name)}</strong> will be removed and won't come back on future refreshes. The topic and its other subtopics stay.`,
+      actionLabel: 'Yes, remove',
+      actionClass: 'btn-danger-outline',
+    });
+  }
+
   /* ── Confirm modal helpers ── */
   function showConfirm({ icon, title, body, actionLabel, actionClass }) {
     const backdrop  = document.getElementById('confirm-modal-backdrop');
@@ -1064,7 +1101,7 @@ const ColMenu = (() => {
 
   async function confirmAction() {
     if (!_pendingAction) return;
-    const { type, topicId } = _pendingAction;
+    const { type, topicId, subtopicId } = _pendingAction;
     closeConfirm();
 
     if (type === 'rerun' && _pendingRerun) {
@@ -1086,6 +1123,10 @@ const ColMenu = (() => {
     if (type === 'delete') {
       await TopicService.deleteTopic(topicId);
       Kanban.removeTopicFromBoard(topicId);
+    }
+
+    if (type === 'removeSubtopic') {
+      await Kanban.removeSubtopic(topicId, subtopicId);
     }
   }
 
@@ -1225,6 +1266,7 @@ const ColMenu = (() => {
     togglePauseTopic,
     confirmClear,
     confirmDelete,
+    confirmRemoveSubtopic,
     confirmAction,
     closeConfirm,
     handleBackdropClick,

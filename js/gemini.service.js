@@ -53,6 +53,7 @@ const GeminiService = (() => {
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
   const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
   const PER_QUERY     = 8;    // items requested per source query
+  const BROAD_LIMIT   = 25;   // deep pool for broad search (merged dual-backend)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
 
   /* ── Get API key ── */
@@ -74,6 +75,13 @@ const GeminiService = (() => {
 
   function _newsUrl(q) {
     return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${PER_QUERY}`;
+  }
+
+  // Broad search: merge=1 unions both news backends for a deep, source-diverse
+  // pool, with a higher limit than per-source queries. Makes broad search a
+  // genuine alternative to hand-entered feeds.
+  function _broadUrl(q) {
+    return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${BROAD_LIMIT}&merge=1`;
   }
 
   function _host(u) {
@@ -129,7 +137,7 @@ const GeminiService = (() => {
     });
     if (includeBroad || plans.length === 0) {
       plans.push({ label: '(broad search)', kind: 'news', query: topicName,
-                   url: _newsUrl(topicName) });
+                   url: _broadUrl(topicName) });
     }
     return plans;
   }
@@ -324,13 +332,21 @@ Rules:
     const cap = _clampSubs(topic.maxSubtopics);
 
     if (items.length === 0) {
-      // per-source failure detail surfaced for diagnosability
-      const dead = sourceReport.filter(r => r.count === 0)
+      // per-source failure detail surfaced for diagnosability (console only)
+      const failed = sourceReport.filter(r => r.count === 0);
+      const dead = failed
         .map(r => `${r.source} (${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ');
+      console.debug('[Exposé] no items — failures:', dead || 'no sources configured');
+      // If every failure is a transient upstream rate-limit/outage, say so softly
+      // rather than dumping raw HTTP codes — a blip shouldn't read as a hard error.
+      const allTransient = failed.length > 0 && failed.every(r =>
+        r.status === 'upstream_error' || /\b(429|502|503|504)\b/.test(r.detail || ''));
       return {
         success: false,
         error:   'NO_RESULTS',
-        message: `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
+        message: allTransient
+          ? 'News providers are briefly rate-limiting — Exposé will retry on the next refresh.'
+          : `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
       };
     }
 
