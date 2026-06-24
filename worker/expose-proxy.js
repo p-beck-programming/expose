@@ -1,22 +1,36 @@
 /**
- * Exposé proxy — Worker v4 (RSS + YouTube sources, Reddit removed)
+ * Exposé proxy — Worker v5 (broad-search rate-limit hardening)
  * Paste over the existing Worker code in the Cloudflare editor and Deploy.
  *
- * WHY v4: Reddit was dropped (unauthenticated JSON is 403-blocked and the dev API
- * signup is a dead end for this use case). It is replaced by two keyless sources that
- * work cleanly from a Worker:
- *
- *   ?type=news    → Google News RSS, fall back to GDELT DOC 2.0  (unchanged from v3)
+ * Endpoints (unchanged shape — gemini.service.js consumes the same item shape):
+ *   ?type=news    → Google News RSS, fall back to GDELT DOC 2.0
  *   ?type=rss     → fetch + parse ANY user-supplied RSS 2.0 or Atom feed
  *   ?type=youtube → resolve a channel (UC id / @handle / channel URL) to its Atom
  *                   feed (youtube.com/feeds/videos.xml?channel_id=…) and parse it
+ * All feed types share one parser (parseFeed) for RSS <item> and Atom <entry>.
  *
- * All feed types share one parser (parseFeed) that understands both RSS <item> and
- * Atom <entry>. Every response uses the same item shape the app already consumes, so
- * gemini.service.js only needs new plan builders — no shape changes.
+ * WHY v5: v4's broad-search "merge" mode called BOTH news backends on every broad
+ * query, which slammed GDELT (it rate-limits hard per-IP, and Workers share egress
+ * IPs) → near-constant 429, so broad-only topics consistently errored. v5 fixes the
+ * reliability without losing depth/diversity:
+ *
+ *   • ?type=news&merge=1 (BROAD mode) is now Google-FIRST: Google News RSS is itself
+ *     a multi-publisher aggregator, so it usually returns a deep, diverse pool alone.
+ *     GDELT is only called when Google is down or returns < BROAD_MIN items, then the
+ *     two are merged + deduped. GDELT is back to a rare, as-needed call.
+ *   • Retry (fetchWithRetry) now retries ONLY 502/503/504 + network errors — never
+ *     429 (its window is seconds, so sub-second retries just guarantee another 429).
+ *   • Response caching (caches.default, NEWS_TTL): successful payloads are cached by
+ *     request URL so repeated refreshes hit cache instead of upstream. Errors are
+ *     never cached, so a genuine failure still retries on the next refresh.
+ *
+ * v4 (RSS + YouTube sources, Reddit removed): replaced Reddit (403-blocked unauth
+ * JSON) with the keyless ?type=rss and ?type=youtube endpoints above.
  */
 
 const PRIMARY = "google"; // "google" | "gdelt" — which news backend to try first
+const BROAD_MIN = 10;     // broad mode: only reach for GDELT if Google returns fewer than this
+const NEWS_TTL = 600;     // seconds to cache successful feed responses (caches.default)
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -33,20 +47,46 @@ const BROWSER_HEADERS = {
 };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
 
     const url = new URL(request.url);
     const type = url.searchParams.get("type") || "news";
 
+    // Serve a cached success if one is still fresh — cuts repeated-refresh load on
+    // the upstreams (the dominant cause of rate-limiting while testing). Cache is
+    // keyed by the full request URL, which is stable for a given broad query.
+    const cache    = caches.default;
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    const hit      = await cache.match(cacheKey);
+    if (hit) return hit;
+
+    let res;
     try {
-      if (type === "news") return await handleNews(url);
-      if (type === "rss") return await handleRss(url);
-      if (type === "youtube") return await handleYouTube(url);
-      return json({ ok: false, type, error: "unknown_type" }, 400);
+      if (type === "news") res = await handleNews(url);
+      else if (type === "rss") res = await handleRss(url);
+      else if (type === "youtube") res = await handleYouTube(url);
+      else res = json({ ok: false, type, error: "unknown_type" }, 400);
     } catch (err) {
       return json({ ok: false, type, error: "proxy_failure", detail: String(err) }, 502);
     }
+
+    // Cache only successful payloads. json() returns HTTP 200 even for ok:false,
+    // so gate on the parsed body — never cache an error (it must retry next time).
+    try {
+      const data = await res.clone().json();
+      if (data && data.ok) {
+        const cached = new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { ...CORS, "Content-Type": "application/json; charset=utf-8",
+                     "Cache-Control": `public, max-age=${NEWS_TTL}` },
+        });
+        const put = cache.put(cacheKey, cached);
+        if (ctx && ctx.waitUntil) ctx.waitUntil(put); else await put;
+      }
+    } catch { /* non-JSON / unreadable — skip caching */ }
+
+    return res;
   },
 };
 
@@ -60,29 +100,33 @@ async function handleNews(url) {
   const limit = clampInt(url.searchParams.get("limit"), 10, 1, 30);
   const merge = url.searchParams.get("merge") === "1";
 
-  // MERGE MODE (broad search): query both backends in parallel and union the
-  // results, so broad search is a deep, source-diverse discovery tool that
-  // survives one backend being rate-limited. Each backend pulls the full limit;
-  // we dedupe and re-cap after merging.
+  // BROAD MODE (merge=1): Google-first, GDELT only when needed. Google News RSS
+  // is itself a multi-publisher aggregator, so it usually returns a deep, diverse
+  // pool on its own. We only call GDELT (which rate-limits aggressively per-IP)
+  // when Google is down or thin — keeping it a rare, as-needed call rather than a
+  // per-request 429 magnet.
   if (merge) {
-    const [g, d] = await Promise.allSettled([
-      fetchGoogleNews(q, when, limit),
-      fetchGdelt(q, when, limit),
-    ]);
-    const ok = [g, d].filter(r => r.status === "fulfilled" && r.value.ok).map(r => r.value);
-    if (ok.length) {
-      const merged = dedupeItems(ok.flatMap(r => r.items))
+    const g = await fetchGoogleNews(q, when, limit);
+    let items   = g.ok ? g.items : [];
+    const used  = g.ok ? ["google"] : [];
+    const fails = g.ok ? [] : [`google: ${g.detail}`];
+
+    if (items.length < BROAD_MIN) {
+      const d = await fetchGdelt(q, when, limit);
+      if (d.ok) { items = dedupeItems(items.concat(d.items)); used.push("gdelt"); }
+      else fails.push(`gdelt: ${d.detail}`);
+    }
+
+    if (items.length) {
+      const out = items
         .sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""))
         .slice(0, limit);
       return json({
-        ok: true, type: "news", backend: ok.map(r => r.backend).join("+"),
-        query: q, fetchedAt: new Date().toISOString(), items: merged,
+        ok: true, type: "news", backend: used.join("+"),
+        query: q, fetchedAt: new Date().toISOString(), items: out,
       });
     }
-    const failures = [g, d].map(r =>
-      r.status === "fulfilled" ? `${r.value.backend}: ${r.value.detail}` : `news: ${String(r.reason)}`
-    );
-    return json({ ok: false, type: "news", query: q, error: "upstream_error", detail: failures.join(" | ") });
+    return json({ ok: false, type: "news", query: q, error: "upstream_error", detail: fails.join(" | ") });
   }
 
   const backends = PRIMARY === "gdelt"
@@ -448,15 +492,16 @@ function decodeGoogleLink(link) {
 
 /* ================= small helpers ================= */
 
-// Transient upstream statuses (429/502/503/504) and network errors are retried
-// with jittered backoff. Both news backends rate-limit intermittently, which
-// otherwise sinks broad-only topics that depend on a single news query.
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
-async function fetchWithRetry(url, opts, { retries = 2, baseMs = 400 } = {}) {
+// Retry only server-transient statuses (502/503/504) and network errors.
+// We deliberately do NOT retry 429: its rate-limit window is seconds, so a
+// sub-second retry just guarantees another 429 and hammers the upstream. On 429
+// we return immediately and let the other backend / response cache cover it.
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+async function fetchWithRetry(url, opts, { retries = 2, baseMs = 700 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) {
-      await new Promise(r => setTimeout(r, baseMs * attempt + Math.floor(Math.random() * 250)));
+      await new Promise(r => setTimeout(r, baseMs * attempt + Math.floor(Math.random() * 300)));
     }
     try {
       const res = await fetch(url, opts);

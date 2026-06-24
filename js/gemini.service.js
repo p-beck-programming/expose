@@ -53,7 +53,7 @@ const GeminiService = (() => {
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
   const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
   const PER_QUERY     = 8;    // items requested per source query
-  const BROAD_LIMIT   = 25;   // deep pool for broad search (merged dual-backend)
+  const BROAD_LIMIT   = 20;   // deep pool for broad search (Google-first, GDELT-on-thin)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
 
   /* ── Get API key ── */
@@ -77,9 +77,9 @@ const GeminiService = (() => {
     return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${PER_QUERY}`;
   }
 
-  // Broad search: merge=1 unions both news backends for a deep, source-diverse
-  // pool, with a higher limit than per-source queries. Makes broad search a
-  // genuine alternative to hand-entered feeds.
+  // Broad search: merge=1 tells the Worker to use broad strategy (Google-first,
+  // GDELT only when thin) for a deep, source-diverse pool, with a higher limit
+  // than per-source queries. Makes broad search a genuine alternative to feeds.
   function _broadUrl(q) {
     return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${BROAD_LIMIT}&merge=1`;
   }
