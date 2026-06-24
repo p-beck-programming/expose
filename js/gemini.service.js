@@ -53,8 +53,28 @@ const GeminiService = (() => {
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
   const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
   const PER_QUERY     = 8;    // items requested per source query
-  const BROAD_LIMIT   = 20;   // deep pool for broad search (Google-first, GDELT-on-thin)
+  const BROAD_LIMIT   = 20;   // legacy: deep pool for the broad-merge fallback (plans.length===0)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
+
+  /* Broad web search (allSourcesEnabled) backup sources. Instead of one fragile
+     broad/GDELT query, broad topics search a curated set of major global + US
+     outlets via the robust per-source site: path. Interleaved so any rotation
+     window of 6 stays balanced across bias (left↔right) and geography
+     (US / UK / Middle East / Europe / Asia / global wire). */
+  const BROAD_SITES = [
+    'reuters.com',      // center wire, global/markets
+    'foxnews.com',      // right, US politics
+    'bbc.com',          // center-left, global breadth
+    'wsj.com',          // center-right, business/finance
+    'aljazeera.com',    // Middle East / Global South lens
+    'npr.org',          // center-left, US depth
+    'apnews.com',       // center wire, US+global
+    'theguardian.com',  // left, UK/global investigative
+    'dw.com',           // Europe (Deutsche Welle), international
+    'thehill.com',      // US politics/policy
+    'france24.com',     // Europe/global (France)
+    'scmp.com',         // Asia (South China Morning Post)
+  ];
 
   /* ── Get API key ── */
   function getApiKey() {
@@ -62,11 +82,6 @@ const GeminiService = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       return s.geminiApiKey || '';
     } catch { return ''; }
-  }
-
-  /* ── Get settings ── */
-  function _getSettings() {
-    try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; }
   }
 
   /* ════════════════════════════════════════════
@@ -117,7 +132,7 @@ const GeminiService = (() => {
      web domains → Google News site: query
      rss feeds   → Worker's rss endpoint (any feed URL)
      youtube     → Worker's youtube endpoint (channel id / @handle / url) */
-  function _buildPlans(topicName, rotated, includeBroad) {
+  function _buildPlans(topicName, rotated) {
     const plans = [];
     (rotated.web || []).forEach(domain => {
       const d = String(domain).trim().toLowerCase()
@@ -135,15 +150,18 @@ const GeminiService = (() => {
       if (c) plans.push({ label: c, kind: 'youtube', query: c,
                           url: `${PROXY}/?type=youtube&channel=${encodeURIComponent(c)}&limit=${PER_QUERY}` });
     });
-    if (includeBroad || plans.length === 0) {
+    // Safety net only: a topic with no usable sources (and broad off) still gets
+    // one query so it isn't dead. Broad topics never reach this — BROAD_SITES fill
+    // the plan list. Uses the legacy merge fallback (hardened in worker v5).
+    if (plans.length === 0) {
       plans.push({ label: '(broad search)', kind: 'news', query: topicName,
                    url: _broadUrl(topicName) });
     }
     return plans;
   }
 
-  async function _fetchItems(topicName, rotated, includeBroad) {
-    const plans = _buildPlans(topicName, rotated, includeBroad);
+  async function _fetchItems(topicName, rotated) {
+    const plans = _buildPlans(topicName, rotated);
 
     const results = await Promise.allSettled(
       plans.map(p => fetch(p.url).then(r => r.json()))
@@ -309,18 +327,16 @@ Rules:
       return { success: true, subtopics: topic.subtopics, fromCache: true, sourceReport: null };
     }
 
-    /* ── Rotate sources, increment offset (X sources dropped) ── */
+    /* ── Rotate sources, increment offset (X sources dropped) ──
+          Broad topics fold the curated BROAD_SITES into their web pool here. ── */
     const offset  = topic.sourceRotationOffset || 0;
-    const rotated = _getRotatedSources(topic.sources || {}, offset);
+    const rotated = _getRotatedSources(_effectiveSources(topic), offset);
     TopicService.updateTopic(topic.id, { sourceRotationOffset: offset + 1 });
-
-    const settings     = _getSettings();
-    const expandTopics = settings.expandTopics !== false;
 
     /* ── STAGE 1: fetch real items ── */
     let fetched;
     try {
-      fetched = await _fetchItems(topic.name, rotated, expandTopics);
+      fetched = await _fetchItems(topic.name, rotated);
     } catch (err) {
       return { success: false, error: 'PROXY_ERROR', message: _friendlyError('PROXY_ERROR') };
     }
@@ -444,6 +460,18 @@ Rules:
       sourceReport,
       fromCache: false,
     };
+  }
+
+  /* Broad web search: fold the curated BROAD_SITES into the topic's web sources
+     (deduped by normalized domain) so broad topics search those outlets via the
+     robust per-source site: path. Returns a copy — never mutates topic.sources. */
+  function _effectiveSources(topic) {
+    const sources = topic.sources || {};
+    if (!topic.allSourcesEnabled) return sources;
+    const userWeb = sources.web || [];
+    const have    = new Set(userWeb.map(_normDomain));
+    const merged  = userWeb.concat(BROAD_SITES.filter(d => !have.has(_normDomain(d))));
+    return { ...sources, web: merged };
   }
 
   /* ── Source rotation ──
