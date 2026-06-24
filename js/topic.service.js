@@ -41,6 +41,14 @@ const TopicService = (() => {
   }
   function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
   function uid() { return '_' + Math.random().toString(36).slice(2, 10); }
+  // Subtopic cap: default 3, clamped to 2–6
+  function clampSubs(n) {
+    const v = Math.round(Number(n));
+    return Number.isFinite(v) ? Math.max(2, Math.min(6, v)) : 3;
+  }
+  // Normalize a subtopic name for the dismissal blocklist (ids regenerate each
+  // refresh, so dismissal must key on the stable name instead).
+  function normName(s) { return String(s || '').trim().toLowerCase(); }
 
   /* ════════════════════════════════
      TOPICS
@@ -59,8 +67,11 @@ const TopicService = (() => {
     const topic = {
       id:               uid(),
       name:             data.name,
-      sources:          data.sources || { x: [], reddit: [], web: [] },
+      sources:          data.sources || { web: [], rss: [], youtube: [] },
+      strictMode:       !!data.strictMode,
+      maxSubtopics:     clampSubs(data.maxSubtopics),
       allSourcesEnabled:!!data.allSourcesEnabled,
+      dismissedSubtopics:[],   // normalized names the user removed — never regenerated
       pinned:           false,
       createdAt:        new Date().toISOString(),
       updatedAt:        new Date().toISOString(),
@@ -131,7 +142,7 @@ const TopicService = (() => {
         summary:     s.summary,
         score:       s.score,
         sourceCount: s.sourceCount,
-        sources:     s.sources || { x: [], reddit: [], web: [] },
+        sources:     s.sources || { web: [], rss: [], youtube: [] },
         broadSources:s.broadSources || [],
         viewed:      prev.viewed || false,
         pinned:      prev.pinned || false,
@@ -141,18 +152,24 @@ const TopicService = (() => {
       };
     });
 
+    // Drop user-dismissed subtopics so they never come back on regeneration.
+    const dismissed = new Set((topics[idx].dismissedSubtopics || []).map(normName));
+    const kept = dismissed.size
+      ? merged.filter(s => !dismissed.has(normName(s.name)))
+      : merged;
+
     // Expire subtopics not seen for 7 days
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const expiredOld = (topics[idx].subtopics || []).filter(s => {
-      const notInNew = !merged.find(m => m.id === s.id);
+      const notInNew = !kept.find(m => m.id === s.id);
       const old = new Date(s.updatedAt).getTime() < weekAgo;
       return notInNew && old;
     }).map(s => ({ ...s, expired: true }));
 
-    topics[idx].subtopics  = [...merged, ...expiredOld];
+    topics[idx].subtopics  = [...kept, ...expiredOld];
     topics[idx].updatedAt  = now;
     topics[idx].status     = 'idle';
-    topics[idx].heatScore  = calcHeatScore(merged);
+    topics[idx].heatScore  = calcHeatScore(kept);
 
     writeTopics(topics);
     return { success: true, topic: topics[idx] };
@@ -180,6 +197,25 @@ const TopicService = (() => {
     topic.subtopics = topic.subtopics.filter(s => s.id !== subtopicId);
     writeTopics(topics);
     return { success: true };
+  }
+
+  // Permanently remove a single subtopic: drop it now AND blocklist its name so
+  // regeneration (setSubtopics) won't bring it back. Topic + other subtopics stay.
+  async function dismissSubtopic(topicId, subtopicId) {
+    const topics = readTopics();
+    const topic  = topics.find(t => t.id === topicId);
+    if (!topic) return { success: false };
+    const sub = (topic.subtopics || []).find(s => s.id === subtopicId);
+    const key = normName(sub?.name);
+    if (key) {
+      topic.dismissedSubtopics = topic.dismissedSubtopics || [];
+      if (!topic.dismissedSubtopics.map(normName).includes(key)) {
+        topic.dismissedSubtopics.push(key);
+      }
+    }
+    topic.subtopics = (topic.subtopics || []).filter(s => s.id !== subtopicId);
+    writeTopics(topics);
+    return { success: true, topic };
   }
 
   async function markViewed(topicId, subtopicId) {
@@ -278,6 +314,7 @@ const TopicService = (() => {
     setSubtopics,
     renameSubtopic,
     deleteSubtopic,
+    dismissSubtopic,
     markViewed,
     pinSubtopic,
     dismissTombstone,

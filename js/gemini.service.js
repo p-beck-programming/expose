@@ -8,7 +8,7 @@
 
    v3 splits the jobs:
      1. FETCH  — real items come from the Exposé Cloudflare Worker
-                 (Google News RSS per source + Reddit best-effort).
+                 (Google News RSS per source + user RSS/YouTube feeds).
                  Every URL originates from a live feed.
      2. CLUSTER — Gemini (NO tools, NO grounding) only groups the
                  fetched items by ID. It never sees or emits URLs.
@@ -18,9 +18,9 @@
    Kept from v2 (same public contract — kanban.js unchanged):
      - fetchSubtopics(topic) → { success, subtopics, fromCache }
      - subtopic shape: { id, name, summary, score, sourceCount,
-       sources: { x, reddit, web }, broadSources, groundingChunks }
-       (x is always [] — X support removed. groundingChunks is
-       always [] — kanban renders nothing for both. No UI edits.)
+       sources: { web, rss, youtube }, broadSources, groundingChunks }
+       (groundingChunks is always [] — grounding removed; kanban
+       renders nothing for empty groups.)
      - 30-minute cache guard, source rotation, MAX_SUBTOPICS = 3,
        MAX_SOURCES = 6, query logging via TopicService.appendLog.
 
@@ -47,11 +47,34 @@ const GeminiService = (() => {
   const MODEL         = 'gemini-2.5-flash-lite';
   const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
   const MAX_SOURCES   = 6;    // hard cap on total sources per subtopic
-  const MAX_SUBTOPICS = 3;    // fixed subtopic count per refresh
+  const MAX_SUBTOPICS = 3;    // default subtopic count per refresh (per-topic override 2–6)
+  const MIN_SUBTOPICS = 2;    // floor for the per-topic subtopic cap
+  const MAX_SUBTOPICS_CAP = 6;// ceiling for the per-topic subtopic cap
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
   const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
   const PER_QUERY     = 8;    // items requested per source query
+  const BROAD_LIMIT   = 20;   // legacy: deep pool for the broad-merge fallback (plans.length===0)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
+
+  /* Broad web search (allSourcesEnabled) backup sources. Instead of one fragile
+     broad/GDELT query, broad topics search a curated set of major global + US
+     outlets via the robust per-source site: path. Interleaved so any rotation
+     window of 6 stays balanced across bias (left↔right) and geography
+     (US / UK / Middle East / Europe / Asia / global wire). */
+  const BROAD_SITES = [
+    'reuters.com',      // center wire, global/markets
+    'foxnews.com',      // right, US politics
+    'bbc.com',          // center-left, global breadth
+    'wsj.com',          // center-right, business/finance
+    'aljazeera.com',    // Middle East / Global South lens
+    'npr.org',          // center-left, US depth
+    'apnews.com',       // center wire, US+global
+    'theguardian.com',  // left, UK/global investigative
+    'dw.com',           // Europe (Deutsche Welle), international
+    'thehill.com',      // US politics/policy
+    'france24.com',     // Europe/global (France)
+    'scmp.com',         // Asia (South China Morning Post)
+  ];
 
   /* ── Get API key ── */
   function getApiKey() {
@@ -59,11 +82,6 @@ const GeminiService = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       return s.geminiApiKey || '';
     } catch { return ''; }
-  }
-
-  /* ── Get settings ── */
-  function _getSettings() {
-    try { return JSON.parse(localStorage.getItem('expose_settings_v1')) || {}; } catch { return {}; }
   }
 
   /* ════════════════════════════════════════════
@@ -74,11 +92,47 @@ const GeminiService = (() => {
     return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${PER_QUERY}`;
   }
 
+  // Broad search: merge=1 tells the Worker to use broad strategy (Google-first,
+  // GDELT only when thin) for a deep, source-diverse pool, with a higher limit
+  // than per-source queries. Makes broad search a genuine alternative to feeds.
+  function _broadUrl(q) {
+    return `${PROXY}/?type=news&q=${encodeURIComponent(q)}&when=${RECENCY}&limit=${BROAD_LIMIT}&merge=1`;
+  }
+
+  function _host(u) {
+    try { return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, ''); }
+    catch { return String(u); }
+  }
+
+  // Subtopic cap: default MAX_SUBTOPICS, clamped to MIN_SUBTOPICS…MAX_SUBTOPICS_CAP
+  function _clampSubs(n) {
+    const v = Math.round(Number(n));
+    return Number.isFinite(v) ? Math.max(MIN_SUBTOPICS, Math.min(MAX_SUBTOPICS_CAP, v)) : MAX_SUBTOPICS;
+  }
+
+  // Normalize a domain string the same way _buildPlans does for web sources.
+  function _normDomain(d) {
+    return String(d || '').trim().toLowerCase()
+      .replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+  // An item's domain, falling back to parsing its URL host.
+  function _domainOf(it) {
+    return _normDomain(it.sourceDomain || (it.url ? _host(it.url) : ''));
+  }
+  // Strict mode: item domain must equal, or be a subdomain of, a listed web domain.
+  function _isAllowedDomain(itemDomain, webList) {
+    if (!itemDomain) return false;
+    return (webList || []).some(src => {
+      const b = _normDomain(src);
+      return b && (itemDomain === b || itemDomain.endsWith('.' + b));
+    });
+  }
+
   /* Build one Worker request per rotated source.
      web domains → Google News site: query
-     reddit subs → Worker's reddit endpoint
-     x handles   → skipped (X support removed)            */
-  function _buildPlans(topicName, rotated, includeBroad) {
+     rss feeds   → Worker's rss endpoint (any feed URL)
+     youtube     → Worker's youtube endpoint (channel id / @handle / url) */
+  function _buildPlans(topicName, rotated) {
     const plans = [];
     (rotated.web || []).forEach(domain => {
       const d = String(domain).trim().toLowerCase()
@@ -86,20 +140,28 @@ const GeminiService = (() => {
       if (d) plans.push({ label: d, kind: 'news', query: `${topicName} site:${d}`,
                           url: _newsUrl(`${topicName} site:${d}`) });
     });
-    (rotated.reddit || []).forEach(sub => {
-      const s = String(sub).trim().replace(/^\/+/, '').replace(/^r\//i, '').replace(/\/+$/, '');
-      if (s) plans.push({ label: `r/${s}`, kind: 'reddit', query: `r/${s}`,
-                          url: `${PROXY}/?type=reddit&sub=${encodeURIComponent(s)}&limit=${PER_QUERY}` });
+    (rotated.rss || []).forEach(feed => {
+      const u = String(feed).trim();
+      if (u) plans.push({ label: _host(u), kind: 'rss', query: u,
+                          url: `${PROXY}/?type=rss&url=${encodeURIComponent(u)}&limit=${PER_QUERY}` });
     });
-    if (includeBroad || plans.length === 0) {
+    (rotated.youtube || []).forEach(ch => {
+      const c = String(ch).trim();
+      if (c) plans.push({ label: c, kind: 'youtube', query: c,
+                          url: `${PROXY}/?type=youtube&channel=${encodeURIComponent(c)}&limit=${PER_QUERY}` });
+    });
+    // Safety net only: a topic with no usable sources (and broad off) still gets
+    // one query so it isn't dead. Broad topics never reach this — BROAD_SITES fill
+    // the plan list. Uses the legacy merge fallback (hardened in worker v5).
+    if (plans.length === 0) {
       plans.push({ label: '(broad search)', kind: 'news', query: topicName,
-                   url: _newsUrl(topicName) });
+                   url: _broadUrl(topicName) });
     }
     return plans;
   }
 
-  async function _fetchItems(topicName, rotated, includeBroad) {
-    const plans = _buildPlans(topicName, rotated, includeBroad);
+  async function _fetchItems(topicName, rotated) {
+    const plans = _buildPlans(topicName, rotated);
 
     const results = await Promise.allSettled(
       plans.map(p => fetch(p.url).then(r => r.json()))
@@ -108,7 +170,6 @@ const GeminiService = (() => {
     const sourceReport = [];
     const queriesUsed  = [];
     let   all          = [];
-    let   redditFellBack = false;
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
@@ -117,25 +178,14 @@ const GeminiService = (() => {
 
       if (body && body.ok) {
         sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length, backend: body.backend || '' });
+        // Tag each item with the plan kind so bucketing is reliable downstream.
+        body.items.forEach(it => { it._kind = plan.kind; });
         all = all.concat(body.items);
         continue;
       }
 
       const reason = body ? body.error : 'network_error';
-      sourceReport.push({ source: plan.label, status: reason, count: 0 });
-
-      // Reddit blocked → one thin fallback through Google's index.
-      if (plan.kind === 'reddit' && !redditFellBack) {
-        redditFellBack = true;
-        try {
-          const fb = await fetch(_newsUrl(`${topicName} site:reddit.com`)).then(r => r.json());
-          if (fb.ok && fb.items.length) {
-            fb.items.forEach(it => { if (!it.source) it.source = 'reddit (via Google)'; });
-            all = all.concat(fb.items);
-            sourceReport.push({ source: 'reddit (via Google)', status: 'fallback', count: fb.items.length });
-          }
-        } catch { /* fallback is best-effort by definition */ }
-      }
+      sourceReport.push({ source: plan.label, status: reason, count: 0, detail: body?.detail || '' });
     }
 
     // Dedupe (same story arrives via multiple queries), newest first, cap.
@@ -213,7 +263,7 @@ const GeminiService = (() => {
     return null;
   }
 
-  function _clusterPrompt(topicName, items) {
+  function _clusterPrompt(topicName, items, cap = MAX_SUBTOPICS) {
     const lines = items.map(it => {
       const date = (it.publishedAt || '').slice(0, 10);
       const snip = it.snippet ? ` | ${it.snippet.slice(0, 150)}` : '';
@@ -226,7 +276,7 @@ Each line: ID | source | date | title | optional snippet.
 
 ${lines}
 
-Group these into at most ${MAX_SUBTOPICS} emerging subtopics (distinct stories or developments).
+Group these into at most ${cap} emerging subtopics (distinct stories or developments).
 
 Rules:
 - Respond with ONLY valid JSON. No markdown, no commentary, no code fences.
@@ -237,20 +287,23 @@ Rules:
   }
 
   /* ── Bucket validated items into the kanban source shape ──
-     reddit items → sources.reddit, everything else → sources.web,
-     sources.x stays [] (kanban skips empty groups). Caps at
-     MAX_SOURCES total: up to 2 reddit, remainder web.            */
+     by the _kind stamped during fetch: youtube → sources.youtube,
+     rss → sources.rss, everything else → sources.web (kanban skips
+     empty groups). Caps at MAX_SOURCES total across all buckets,
+     preserving the (date-sorted) order.                           */
   function _toSourceBuckets(linkedItems) {
-    const isReddit = it => it.sourceDomain === 'reddit.com' || /^r\//i.test(it.source || '');
     const art = it => ({
       title:       it.title,
       source:      it.source || it.sourceDomain || 'web',
       url:         it.url || '',
       publishedAt: it.publishedAt || '',
     });
-    const reddit = linkedItems.filter(isReddit).slice(0, 2).map(art);
-    const web    = linkedItems.filter(it => !isReddit(it)).slice(0, MAX_SOURCES - reddit.length).map(art);
-    return { x: [], reddit, web };
+    const buckets = { web: [], rss: [], youtube: [] };
+    for (const it of linkedItems.slice(0, MAX_SOURCES)) {
+      const key = it._kind === 'youtube' ? 'youtube' : it._kind === 'rss' ? 'rss' : 'web';
+      buckets[key].push(art(it));
+    }
+    return buckets;
   }
 
   /* ════════════════════════════════════════════
@@ -274,37 +327,65 @@ Rules:
       return { success: true, subtopics: topic.subtopics, fromCache: true, sourceReport: null };
     }
 
-    /* ── Rotate sources, increment offset (X sources dropped) ── */
+    /* ── Rotate sources, increment offset (X sources dropped) ──
+          Broad topics fold the curated BROAD_SITES into their web pool here. ── */
     const offset  = topic.sourceRotationOffset || 0;
-    const rotated = _getRotatedSources(topic.sources || {}, offset);
+    const rotated = _getRotatedSources(_effectiveSources(topic), offset);
     TopicService.updateTopic(topic.id, { sourceRotationOffset: offset + 1 });
-
-    const settings     = _getSettings();
-    const expandTopics = settings.expandTopics !== false;
 
     /* ── STAGE 1: fetch real items ── */
     let fetched;
     try {
-      fetched = await _fetchItems(topic.name, rotated, expandTopics);
+      fetched = await _fetchItems(topic.name, rotated);
     } catch (err) {
       return { success: false, error: 'PROXY_ERROR', message: _friendlyError('PROXY_ERROR') };
     }
-    const { items, sourceReport, queriesUsed } = fetched;
+    let { items } = fetched;
+    const { sourceReport, queriesUsed } = fetched;
     console.debug('[Exposé] source report:', sourceReport);
 
+    /* ── Per-topic subtopic cap (default 3, clamped 2–6) ── */
+    const cap = _clampSubs(topic.maxSubtopics);
+
     if (items.length === 0) {
-      const dead = sourceReport.filter(r => r.count === 0).map(r => `${r.source} (${r.status})`).join(', ');
+      // per-source failure detail surfaced for diagnosability (console only)
+      const failed = sourceReport.filter(r => r.count === 0);
+      const dead = failed
+        .map(r => `${r.source} (${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ');
+      console.debug('[Exposé] no items — failures:', dead || 'no sources configured');
+      // If every failure is a transient upstream rate-limit/outage, say so softly
+      // rather than dumping raw HTTP codes — a blip shouldn't read as a hard error.
+      const allTransient = failed.length > 0 && failed.every(r =>
+        r.status === 'upstream_error' || /\b(429|502|503|504)\b/.test(r.detail || ''));
       return {
         success: false,
         error:   'NO_RESULTS',
-        message: `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
+        message: allTransient
+          ? 'News providers are briefly rate-limiting — Exposé will retry on the next refresh.'
+          : `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
       };
+    }
+
+    /* ── STRICT MODE: drop web items whose domain isn't in topic.sources.web.
+          rss/youtube items come from user-named feeds, so they always pass.
+          Filtering before clustering keeps Gemini from forming subtopics
+          around disallowed sources. ── */
+    if (topic.strictMode) {
+      const webList = (topic.sources && topic.sources.web) || [];
+      items = items.filter(it => it._kind !== 'news' || _isAllowedDomain(_domainOf(it), webList));
+      if (items.length === 0) {
+        return {
+          success: false,
+          error:   'NO_RESULTS',
+          message: `No items from your listed sites in the last 72h (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
+        };
+      }
     }
 
     /* ── STAGE 2: cluster by ID ── */
     let text;
     try {
-      text = await _callGemini(_clusterPrompt(topic.name, items));
+      text = await _callGemini(_clusterPrompt(topic.name, items, cap));
     } catch (err) {
       return { success: false, error: err.message, message: _friendlyError(err.message) };
     }
@@ -334,14 +415,14 @@ Rules:
           summary:         String(st.summary || ''),
           score:           Number.isFinite(st.score) ? st.score : 50,
           sources,
-          sourceCount:     sources.reddit.length + sources.web.length,
+          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length,
           broadSources:    [],
           groundingChunks: [], // grounding removed — kanban renders nothing for []
         };
       })
       .filter(Boolean)
       .sort((a, b) => (b.score || 0) - (a.score || 0))
-      .slice(0, MAX_SUBTOPICS);
+      .slice(0, cap);
 
     if (subtopics.length === 0) {
       return {
@@ -355,7 +436,7 @@ Rules:
           subtopics' own sources, from the broad query, top 4. ── */
     if (topic.allSourcesEnabled) {
       const usedTitles = new Set(
-        subtopics.flatMap(s => [...s.sources.reddit, ...s.sources.web]).map(a => a.title)
+        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube]).map(a => a.title)
       );
       subtopics[0].broadSources = items
         .filter(it => !usedTitles.has(it.title))
@@ -381,32 +462,37 @@ Rules:
     };
   }
 
-  /* ── Source rotation (kept from v2, X filtered out) ──
+  /* Broad web search: fold the curated BROAD_SITES into the topic's web sources
+     (deduped by normalized domain) so broad topics search those outlets via the
+     robust per-source site: path. Returns a copy — never mutates topic.sources. */
+  function _effectiveSources(topic) {
+    const sources = topic.sources || {};
+    if (!topic.allSourcesEnabled) return sources;
+    const userWeb = sources.web || [];
+    const have    = new Set(userWeb.map(_normDomain));
+    const merged  = userWeb.concat(BROAD_SITES.filter(d => !have.has(_normDomain(d))));
+    return { ...sources, web: merged };
+  }
+
+  /* ── Source rotation ──
      Distributes MAX_SOURCES query slots across the user's
-     reddit + web sources, rotating the window each refresh
-     so every source gets coverage over time.              */
+     web + rss + youtube sources, rotating the window each
+     refresh so every source gets coverage over time.       */
+  const SOURCE_KINDS = ['web', 'rss', 'youtube'];
+
   function _getRotatedSources(sources, offset) {
-    const reddit = sources.reddit || [];
-    const web    = sources.web    || [];
-    const total  = reddit.length + web.length;
+    const all = SOURCE_KINDS.flatMap(type =>
+      (sources[type] || []).map(value => ({ type, value }))
+    );
+    const total = all.length;
 
-    if (total <= MAX_SOURCES) return { reddit, web };
+    const pickWindow = total <= MAX_SOURCES
+      ? all
+      : Array.from({ length: MAX_SOURCES }, (_, i) => all[(offset % total + i) % total]);
 
-    const all = [
-      ...reddit.map(v => ({ type: 'reddit', value: v })),
-      ...web.map(v    => ({ type: 'web',    value: v })),
-    ];
-
-    const start  = offset % total;
-    const window = [];
-    for (let i = 0; i < MAX_SOURCES; i++) {
-      window.push(all[(start + i) % total]);
-    }
-
-    return {
-      reddit: window.filter(s => s.type === 'reddit').map(s => s.value),
-      web:    window.filter(s => s.type === 'web').map(s => s.value),
-    };
+    const out = { web: [], rss: [], youtube: [] };
+    pickWindow.forEach(s => out[s.type].push(s.value));
+    return out;
   }
 
   /* ── Human-readable error messages ── */

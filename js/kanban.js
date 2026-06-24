@@ -327,13 +327,15 @@ const Kanban = (() => {
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
 
     // Source bubbles
-    const redditCount = (sub.sources?.reddit  || []).length;
-    const webCount    = (sub.sources?.web     || []).length;
+    const webCount = (sub.sources?.web     || []).length;
+    const rssCount = (sub.sources?.rss     || []).length;
+    const ytCount  = (sub.sources?.youtube || []).length;
     const bubbles = [
-      redditCount > 0 ? `<span class="source-bubble reddit-bubble">${redditLogoSvg(9)}${redditCount}</span>` : '',
-      webCount    > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
+      webCount > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
+      rssCount > 0 ? `<span class="source-bubble rss-bubble">${rssSvg(9)}${rssCount}</span>` : '',
+      ytCount  > 0 ? `<span class="source-bubble youtube-bubble">${youtubeSvg(9)}${ytCount}</span>` : '',
     ].join('');
-    const totalSources = redditCount + webCount;
+    const totalSources = webCount + rssCount + ytCount;
 
     card.innerHTML = `
       <div class="card-header" onclick="Kanban.toggleCard('${sub.id}', '${topicId}', event)">
@@ -353,6 +355,12 @@ const Kanban = (() => {
           <button class="card-action-btn pinned-btn ${sub.pinned ? 'is-pinned' : ''}" title="${sub.pinned ? 'Unpin' : 'Pin'}"
             onclick="event.stopPropagation();Kanban.togglePin('${topicId}', '${sub.id}', ${sub.pinned})">
             ${pinIcon(11)}
+          </button>
+          <button class="card-action-btn remove-btn" title="Remove subtopic"
+            onclick="event.stopPropagation();ColMenu.confirmRemoveSubtopic('${topicId}', '${sub.id}')">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2,3 10,3"/><path d="M4.5 3V2h3v1"/><path d="M3.5 3l.5 7h4l.5-7"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -382,8 +390,9 @@ const Kanban = (() => {
 
   function buildExpandedContent(sub) {
     const groups = [
-      { key: 'reddit', label: 'Reddit',       iconCls: 'reddit-icon-sm', icon: redditLogoSvg(10) },
-      { key: 'web',    label: 'Web',          iconCls: 'web-icon-sm',    icon: webSvg(10) },
+      { key: 'web',     label: 'Web',     iconCls: 'web-icon-sm',     icon: webSvg(10) },
+      { key: 'rss',     label: 'RSS',     iconCls: 'rss-icon-sm',     icon: rssSvg(10) },
+      { key: 'youtube', label: 'YouTube', iconCls: 'youtube-icon-sm', icon: youtubeSvg(10) },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -612,6 +621,20 @@ const Kanban = (() => {
     document.getElementById(`tomb-${subtopicId}`)?.remove();
   }
 
+  // Permanently remove a single subtopic (blocklisted so it won't regenerate).
+  // Called from the confirm dialog (ColMenu.confirmRemoveSubtopic).
+  async function removeSubtopic(topicId, subtopicId) {
+    const res = await TopicService.dismissSubtopic(topicId, subtopicId);
+    const topic = topics.find(t => t.id === topicId);
+    if (topic) {
+      topic.subtopics = (topic.subtopics || []).filter(s => s.id !== subtopicId);
+      // keep the in-memory blocklist in sync with the persisted copy
+      if (res?.topic) topic.dismissedSubtopics = res.topic.dismissedSubtopics;
+    }
+    renderColumn(topicId);
+    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
+  }
+
   async function refreshCard(topicId) {
     await fetchTopicData(topicId);
   }
@@ -714,7 +737,7 @@ const Kanban = (() => {
     if (!overlay || !body) return;
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
-    const totalSrc   = (sub.sources?.reddit?.length || 0) + (sub.sources?.web?.length || 0);
+    const totalSrc   = (sub.sources?.web?.length || 0) + (sub.sources?.rss?.length || 0) + (sub.sources?.youtube?.length || 0);
 
     body.innerHTML = `
       <div class="fullscreen-identifier">${esc(topic?.name || 'Topic')}</div>
@@ -746,8 +769,9 @@ const Kanban = (() => {
 
   function buildFullscreenSources(sub) {
     const groups = [
-      { key: 'reddit', label: 'Reddit' },
-      { key: 'web',    label: 'Web sources' },
+      { key: 'web',     label: 'Web sources' },
+      { key: 'rss',     label: 'RSS feeds' },
+      { key: 'youtube', label: 'YouTube' },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -899,8 +923,11 @@ const Kanban = (() => {
   function xLogoSvg(size = 12) {
     return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.631 5.905-5.631zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`;
   }
-  function redditLogoSvg(size = 12) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>`;
+  function rssSvg(size = 12) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.39 12.61 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83C13.9 14.45 9.55 10.1 4 10.1z"/></svg>`;
+  }
+  function youtubeSvg(size = 12) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor"><path d="M23.5 6.2a3.02 3.02 0 0 0-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.51A3.02 3.02 0 0 0 .5 6.2C0 8.07 0 12 0 12s0 3.93.5 5.8a3.02 3.02 0 0 0 2.12 2.14c1.88.51 9.38.51 9.38.51s7.5 0 9.38-.51a3.02 3.02 0 0 0 2.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.8zM9.6 15.6V8.4l6.2 3.6-6.2 3.6z"/></svg>`;
   }
   function webSvg(size = 12) {
     return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="${size}" height="${size}"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>`;
@@ -919,6 +946,7 @@ const Kanban = (() => {
     toggleCard,
     togglePin,
     dismissTombstone,
+    removeSubtopic,
     refreshCard,
     openColMenu,
     openFullscreen,
@@ -941,7 +969,11 @@ window.Kanban = Kanban;
 const ColMenu = (() => {
   let _pendingAction = null; // { type, topicId }
   let _editTopicId   = null;
-  let _editSources   = { x: [], reddit: [], web: [] };
+  let _editSources   = { web: [], rss: [], youtube: [] };
+  let _editStrict    = false;
+  let _editBroad     = false;
+  let _editMaxSubs   = 3;
+  const EDIT_SUBS_MIN = 2, EDIT_SUBS_MAX = 6;
   let _pendingRerun = null; // { query, topicName }
 
   function showRerunConfirm(query) {
@@ -1020,6 +1052,22 @@ const ColMenu = (() => {
     });
   }
 
+  /* ── Remove a single subtopic (persistent) — show confirm ── */
+  async function confirmRemoveSubtopic(topicId, subtopicId) {
+    const topics = await TopicService.getTopics();
+    const topic  = Array.isArray(topics) ? topics.find(t => t.id === topicId) : null;
+    const sub    = topic?.subtopics?.find(s => s.id === subtopicId);
+    const name   = sub?.name || 'this subtopic';
+    _pendingAction = { type: 'removeSubtopic', topicId, subtopicId };
+    showConfirm({
+      icon:        'danger',
+      title:       'Remove subtopic?',
+      body:        `<strong>${esc(name)}</strong> will be removed and won't come back on future refreshes. The topic and its other subtopics stay.`,
+      actionLabel: 'Yes, remove',
+      actionClass: 'btn-danger-outline',
+    });
+  }
+
   /* ── Confirm modal helpers ── */
   function showConfirm({ icon, title, body, actionLabel, actionClass }) {
     const backdrop  = document.getElementById('confirm-modal-backdrop');
@@ -1053,7 +1101,7 @@ const ColMenu = (() => {
 
   async function confirmAction() {
     if (!_pendingAction) return;
-    const { type, topicId } = _pendingAction;
+    const { type, topicId, subtopicId } = _pendingAction;
     closeConfirm();
 
     if (type === 'rerun' && _pendingRerun) {
@@ -1076,6 +1124,10 @@ const ColMenu = (() => {
       await TopicService.deleteTopic(topicId);
       Kanban.removeTopicFromBoard(topicId);
     }
+
+    if (type === 'removeSubtopic') {
+      await Kanban.removeSubtopic(topicId, subtopicId);
+    }
   }
 
   /* ── Edit sources ── */
@@ -1087,16 +1139,22 @@ const ColMenu = (() => {
 
     _editTopicId = topicId;
     _editSources = {
-      x:      [...(topic.sources?.x      || [])],
-      reddit: [...(topic.sources?.reddit || [])],
-      web:    [...(topic.sources?.web    || [])],
+      web:     [...(topic.sources?.web     || [])],
+      rss:     [...(topic.sources?.rss     || [])],
+      youtube: [...(topic.sources?.youtube || [])],
     };
+    _editStrict  = !!topic.strictMode;
+    _editBroad   = !!topic.allSourcesEnabled;
+    _editMaxSubs = Math.max(EDIT_SUBS_MIN, Math.min(EDIT_SUBS_MAX, Math.round(Number(topic.maxSubtopics)) || 3));
 
     document.getElementById('edit-sources-topic-name').textContent =
       `Editing sources for "${topic.name}"`;
 
     renderEditTags();
-    ['reddit','web'].forEach(t => {
+    syncEditStrictUI();
+    syncEditBroadUI();
+    syncEditStepperUI();
+    ['web','rss','youtube'].forEach(t => {
       const el = document.getElementById(`edit-${t}-input`);
       if (el) el.value = '';
     });
@@ -1104,8 +1162,42 @@ const ColMenu = (() => {
     document.getElementById('edit-sources-backdrop')?.classList.add('open');
   }
 
+  function toggleEditStrict() {
+    _editStrict = !_editStrict;
+    if (_editStrict && _editBroad) { _editBroad = false; syncEditBroadUI(); }
+    syncEditStrictUI();
+  }
+
+  function toggleEditBroad() {
+    _editBroad = !_editBroad;
+    if (_editBroad && _editStrict) { _editStrict = false; syncEditStrictUI(); }
+    syncEditBroadUI();
+  }
+
+  function stepEditSubtopics(delta) {
+    _editMaxSubs = Math.max(EDIT_SUBS_MIN, Math.min(EDIT_SUBS_MAX, _editMaxSubs + delta));
+    syncEditStepperUI();
+  }
+
+  function syncEditStrictUI() {
+    document.getElementById('edit-strict-toggle')?.classList.toggle('on', _editStrict);
+    document.getElementById('edit-strict-row')?.classList.toggle('enabled', _editStrict);
+  }
+  function syncEditBroadUI() {
+    document.getElementById('edit-broad-toggle')?.classList.toggle('on', _editBroad);
+    document.getElementById('edit-broad-block')?.classList.toggle('enabled', _editBroad);
+  }
+  function syncEditStepperUI() {
+    const val = document.getElementById('edit-subtopic-count-value');
+    if (val) val.textContent = _editMaxSubs;
+    const minus = document.getElementById('edit-subtopic-minus');
+    const plus  = document.getElementById('edit-subtopic-plus');
+    if (minus) minus.disabled = _editMaxSubs <= EDIT_SUBS_MIN;
+    if (plus)  plus.disabled  = _editMaxSubs >= EDIT_SUBS_MAX;
+  }
+
   function renderEditTags() {
-    ['reddit','web'].forEach(type => {
+    ['web','rss','youtube'].forEach(type => {
       const container = document.getElementById(`edit-${type}-tags`);
       if (!container) return;
       container.innerHTML = '';
@@ -1128,9 +1220,10 @@ const ColMenu = (() => {
     if (!input) return;
     let val = input.value.trim();
     if (!val) return;
-    if (type === 'reddit') val = 'r/' + val.replace(/^r\//, '');
-    if (type === 'x' && !val.startsWith('@') && !val.includes(' ')) val = '@' + val;
-    if (_editSources[type].includes(val)) { input.value = ''; return; }
+    if (type === 'web') val = val.replace(/^https?:\/\//i, '').replace(/^www\./, '').split(/[?#]/)[0].replace(/\/+$/, '');
+    if (type === 'rss' && !/^https?:\/\//i.test(val)) val = 'https://' + val;
+    // youtube: keep raw (@handle / channel URL / UC… id) — the Worker resolves it.
+    if (!val || _editSources[type].includes(val)) { input.value = ''; return; }
     _editSources[type].push(val);
     input.value = '';
     renderEditTags();
@@ -1152,7 +1245,12 @@ const ColMenu = (() => {
 
   async function saveEditSources() {
     if (!_editTopicId) return;
-    await TopicService.updateTopic(_editTopicId, { sources: { ..._editSources } });
+    await TopicService.updateTopic(_editTopicId, {
+      sources:           { ..._editSources },
+      strictMode:        _editStrict,
+      allSourcesEnabled: _editBroad,
+      maxSubtopics:      _editMaxSubs,
+    });
     closeEditSources();
     // Re-render the column to reflect source changes
     Kanban.renderColumn(_editTopicId);
@@ -1168,6 +1266,7 @@ const ColMenu = (() => {
     togglePauseTopic,
     confirmClear,
     confirmDelete,
+    confirmRemoveSubtopic,
     confirmAction,
     closeConfirm,
     handleBackdropClick,
@@ -1177,6 +1276,9 @@ const ColMenu = (() => {
     closeEditSources,
     handleEditBackdropClick,
     saveEditSources,
+    toggleEditStrict,
+    toggleEditBroad,
+    stepEditSubtopics,
     showRerunConfirm,
     showConfirm,
     _outsideClick,
