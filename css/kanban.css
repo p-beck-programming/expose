@@ -132,6 +132,7 @@
 .card-action-btn:hover { background:var(--panel3); color:var(--txt); }
 .card-action-btn svg { width:11px; height:11px; }
 .card-action-btn.pinned-btn.is-pinned { opacity:1; color:var(--acc); }
+.card-action-btn.remove-btn:hover { background:var(--panel3); color:var(--alert); }
 
 .card-meta-row {
   display:flex; align-items:center; justify-content:space-between; gap:8px;
@@ -144,9 +145,9 @@
   padding:2px 7px; background:var(--panel3); border-radius:2px;
 }
 .source-bubble svg { width:9px; height:9px; fill:currentColor; }
-.source-bubble.reddit-bubble { color:#D89A8C; }
 .source-bubble.web-bubble { color:var(--dim); }
-.source-bubble.x-bubble { display:none; } /* X retired */
+.source-bubble.rss-bubble { color:#E0A66A; }
+.source-bubble.youtube-bubble { color:#D9777A; }
 .card-right { display:flex; align-items:center; gap:9px; }
 .card-source-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); }
 

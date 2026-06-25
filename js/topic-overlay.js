@@ -29,9 +29,12 @@ const Overlay = (() => {
   let currentStep = 1;
   const totalSteps = 2;
 
-  // Sources per type: { x: [], reddit: [], web: [] }
-  let sources = { x: [], reddit: [], web: [] };
+  // Sources per type: { web: [], rss: [], youtube: [] }
+  let sources = { web: [], rss: [], youtube: [] };
   let allSourcesEnabled = false;
+  let strictMode = false;       // only return items from the listed web sites
+  let maxSubtopics = 3;         // per-topic subtopic cap (2–6)
+  const SUBS_MIN = 2, SUBS_MAX = 6;
 
   /* ── DOM refs (resolved at open time) ── */
   const $ = id => document.getElementById(id);
@@ -65,21 +68,22 @@ const Overlay = (() => {
   /* ── Reset ── */
   function reset() {
     currentStep = 1;
-    sources = { x: [], reddit: [], web: [] };
+    sources = { web: [], rss: [], youtube: [] };
     allSourcesEnabled = false;
 
     // Clear inputs
     const nameInput = $('topic-name-input');
     if (nameInput) { nameInput.value = ''; nameInput.classList.remove('error'); }
-    ['reddit-input', 'web-input'].forEach(id => {
+    ['web-input', 'rss-input', 'youtube-input'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
-    // Reset toggle
-    const toggle = $('all-sources-toggle');
-    if (toggle) toggle.classList.remove('on');
-    const block = $('all-sources-block');
-    if (block) block.classList.remove('enabled');
+    // Reset toggles + stepper
     allSourcesEnabled = false;
+    strictMode = false;
+    maxSubtopics = 3;
+    syncBroadUI();
+    syncStrictUI();
+    syncStepperUI();
 
     // Collapse all source sections
     document.querySelectorAll('.source-section').forEach(s => s.classList.remove('expanded'));
@@ -153,7 +157,7 @@ const Overlay = (() => {
     const btn = $('overlay-next-btn');
 
     // Require at least one source or all-sources enabled
-    const totalSources = sources.x.length + sources.reddit.length + sources.web.length;
+    const totalSources = sources.web.length + sources.rss.length + sources.youtube.length;
     const hint = $('no-sources-hint');
     if (totalSources === 0 && !allSourcesEnabled) {
       if (hint) { hint.style.display = 'flex'; }
@@ -172,6 +176,8 @@ const Overlay = (() => {
       name: $('topic-name-input')?.value?.trim(),
       sources,
       allSourcesEnabled,
+      strictMode,
+      maxSubtopics,
     });
 
     if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
@@ -186,12 +192,7 @@ const Overlay = (() => {
   /* ── Source management ── */
   function addSource(type) {
     let value = '';
-    if (type === 'reddit') {
-      const raw = $('reddit-input')?.value?.trim().replace(/^r\//, '');
-      if (!raw) return;
-      value = 'r/' + raw;
-      if ($('reddit-input')) $('reddit-input').value = '';
-    } else if (type === 'web') {
+    if (type === 'web') {
       // Accept anything: full URLs (https://…), bare domains, with or without paths.
       const raw = $('web-input')?.value?.trim()
         .replace(/^https?:\/\//i, '').replace(/^www\./, '')
@@ -199,6 +200,18 @@ const Overlay = (() => {
       if (!raw) return;
       value = raw;
       if ($('web-input')) $('web-input').value = '';
+    } else if (type === 'rss') {
+      // Require a full feed URL so the Worker can fetch it directly.
+      const raw = $('rss-input')?.value?.trim();
+      if (!raw) return;
+      value = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+      if ($('rss-input')) $('rss-input').value = '';
+    } else if (type === 'youtube') {
+      // Accept @handle, channel URL, or UC… id — the Worker resolves it.
+      const raw = $('youtube-input')?.value?.trim();
+      if (!raw) return;
+      value = raw;
+      if ($('youtube-input')) $('youtube-input').value = '';
     }
     if (!value) return;
     if (sources[type].includes(value)) return; // no duplicates
@@ -237,7 +250,7 @@ const Overlay = (() => {
   }
 
   function updateSourceCounts() {
-    const counts = { x: sources.x.length, reddit: sources.reddit.length, web: sources.web.length };
+    const counts = { web: sources.web.length, rss: sources.rss.length, youtube: sources.youtube.length };
     Object.entries(counts).forEach(([type, count]) => {
       const el = $(`${type}-count`);
       if (el) el.textContent = count > 0 ? count : '';
@@ -255,10 +268,42 @@ const Overlay = (() => {
 
   function toggleAllSources() {
     allSourcesEnabled = !allSourcesEnabled;
+    // Strict ("only my sites") and broad ("search beyond my sites") are opposites.
+    if (allSourcesEnabled && strictMode) { strictMode = false; syncStrictUI(); }
+    syncBroadUI();
+  }
+
+  function toggleStrict() {
+    strictMode = !strictMode;
+    if (strictMode && allSourcesEnabled) { allSourcesEnabled = false; syncBroadUI(); }
+    syncStrictUI();
+  }
+
+  function stepSubtopics(delta) {
+    maxSubtopics = Math.max(SUBS_MIN, Math.min(SUBS_MAX, maxSubtopics + delta));
+    syncStepperUI();
+  }
+
+  /* ── UI sync helpers ── */
+  function syncBroadUI() {
     const toggle = $('all-sources-toggle');
     const block  = $('all-sources-block');
     if (toggle) toggle.classList.toggle('on', allSourcesEnabled);
     if (block)  block.classList.toggle('enabled', allSourcesEnabled);
+  }
+  function syncStrictUI() {
+    const toggle = $('strict-toggle');
+    const row    = $('strict-row');
+    if (toggle) toggle.classList.toggle('on', strictMode);
+    if (row)    row.classList.toggle('enabled', strictMode);
+  }
+  function syncStepperUI() {
+    const val = $('subtopic-count-value');
+    if (val) val.textContent = maxSubtopics;
+    const minus = $('subtopic-minus');
+    const plus  = $('subtopic-plus');
+    if (minus) minus.disabled = maxSubtopics <= SUBS_MIN;
+    if (plus)  plus.disabled  = maxSubtopics >= SUBS_MAX;
   }
 
   function setSuggestion(text) {
@@ -279,7 +324,7 @@ const Overlay = (() => {
   }
 
   /* ── Public API ── */
-  return { open, close, goToStep2, submit, addSource, removeSource, toggleSection, toggleAllSources, setSuggestion, updateCharCount };
+  return { open, close, goToStep2, submit, addSource, removeSource, toggleSection, toggleAllSources, toggleStrict, stepSubtopics, setSuggestion, updateCharCount };
 })();
 
 /* Expose globally for inline onclick handlers */

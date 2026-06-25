@@ -86,9 +86,11 @@
   display:flex; align-items:center; justify-content:center; color:var(--dim);
 }
 .source-icon svg { width:13px; height:13px; }
-.source-icon.reddit-icon { color:#D89A8C; }
-.source-icon.reddit-icon svg { fill:currentColor; }
 .source-icon.web-icon { color:var(--acc-hi); }
+.source-icon.rss-icon { color:#E0A66A; }
+.source-icon.rss-icon svg { fill:currentColor; }
+.source-icon.youtube-icon { color:#D9777A; }
+.source-icon.youtube-icon svg { fill:currentColor; }
 .source-section-name { font-family:var(--font-ui); font-weight:600; font-size:12px; letter-spacing:.1em; text-transform:uppercase; flex:1; }
 .source-section-count { font-family:var(--font-mono); font-size:11px; color:var(--acc-hi); }
 .source-chevron { color:var(--faint); display:flex; transition:transform .2s; }
@@ -163,6 +165,41 @@
 }
 .toggle-switch.on { background:var(--acc); border-color:var(--acc); }
 .toggle-switch.on::after { transform:translateX(16px); background:var(--acc-ink); }
+
+/* Strict-mode row — sits inside the Websites source card */
+.strict-row {
+  display:flex; align-items:center; gap:12px;
+  margin-top:12px; padding-top:11px; border-top:1px solid var(--line-soft);
+  cursor:pointer; user-select:none;
+}
+.strict-text { flex:1; min-width:0; }
+.strict-title { font-family:var(--font-ui); font-weight:600; font-size:11.5px; letter-spacing:.04em; }
+.strict-row.enabled .strict-title { color:var(--acc-hi); }
+.strict-desc { font-size:11px; color:var(--dim); margin-top:2px; line-height:1.4; }
+
+/* Stepper — subtopics-per-refresh counter */
+.stepper-block {
+  display:flex; align-items:center; gap:14px;
+  border:1px solid var(--line); border-radius:var(--r-md);
+  padding:13px; margin-top:10px;
+}
+.stepper-text { flex:1; min-width:0; }
+.stepper-title { font-family:var(--font-ui); font-weight:600; font-size:12px; letter-spacing:.08em; }
+.stepper-desc { font-size:11.5px; color:var(--dim); margin-top:3px; line-height:1.45; }
+.stepper { display:flex; align-items:center; gap:2px; flex-shrink:0; }
+.stepper-btn {
+  width:28px; height:28px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-ui); font-size:16px; line-height:1;
+  background:var(--panel3); border:1px solid var(--line); border-radius:var(--r-sm);
+  color:var(--txt); cursor:pointer; transition:border-color .15s, color .15s;
+}
+.stepper-btn:hover:not(:disabled) { border-color:var(--acc); color:var(--acc-hi); }
+.stepper-btn:disabled { opacity:.4; cursor:default; }
+.stepper-value {
+  min-width:30px; text-align:center;
+  font-family:var(--font-mono); font-size:14px; font-weight:500; color:var(--txt);
+}
 
 .no-sources-note {
   display:flex; align-items:center; gap:7px;
