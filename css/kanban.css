@@ -460,3 +460,12 @@
   font-family:var(--font-mono); font-size:8.5px; letter-spacing:.1em;
   color:var(--trace); border:1px solid var(--trace); border-radius:2px; padding:1px 5px;
 }
+
+/* ═══════════ Mobile (≤768px): one column at a time, swipeable ═══════════ */
+@media (max-width: 768px) {
+  .kanban-area { scroll-snap-type:x mandatory; gap:10px; }
+  .kanban-col, .kanban-col.pinned-col {
+    width:86vw; min-width:86vw; max-width:86vw;
+    scroll-snap-align:start;
+  }
+}

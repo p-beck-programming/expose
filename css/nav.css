@@ -51,3 +51,8 @@
 }
 .topnav-theme:hover { color: var(--txt); border-color: var(--faint); }
 .topnav-theme svg { width: 13px; height: 13px; display: block; }
+
+/* ── Mobile (≤768px): tighten the top nav so it fits a phone ── */
+@media (max-width: 768px) {
+  .topnav { padding: 0 18px; }
+}

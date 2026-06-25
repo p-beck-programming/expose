@@ -135,3 +135,8 @@
   .landing-content { padding: 0 20px; }
   .topnav { padding: 0 20px; }
 }
+
+@media (max-width: 480px) {
+  .hero-sub { font-size: 15px; }
+  .proof-strip { gap: 18px 24px; padding: 22px 0 56px; }
+}
