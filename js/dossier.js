@@ -72,7 +72,13 @@ const Dossier = (() => {
 
   function refresh() {
     const existing = $('dossier-col');
-    if (existing) existing.replaceWith(buildColumn());
+    if (ArticleService.count() > 0) {
+      const newCol = buildColumn();
+      if (existing) existing.replaceWith(newCol);
+      else document.getElementById('kanban-area')?.appendChild(newCol);
+    } else if (existing) {
+      existing.remove();
+    }
   }
 
   function removeArticle(id) {
