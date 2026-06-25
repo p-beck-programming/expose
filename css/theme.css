@@ -65,7 +65,7 @@
   --font-ui:'Chakra Petch',sans-serif;
   --font-body:'IBM Plex Sans',sans-serif;
   --font-mono:'IBM Plex Mono',monospace;
-  --sidebar-w:236px; --topbar-h:54px;
+  --sidebar-w:236px; --sidebar-collapsed-w:52px; --topbar-h:54px;
   --r-sm:3px; --r-md:5px; --r-lg:8px; --r-xl:10px; --r-pill:999px;
 
   /* legacy names → console tokens */
@@ -100,15 +100,18 @@ button { font-family:inherit; }
 ::-webkit-scrollbar-thumb:hover { background:var(--faint); }
 
 /* ═══════════ App shell ═══════════ */
-.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:minmax(0,1fr); height:100vh; }
+.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:minmax(0,1fr); height:100vh; transition:grid-template-columns .22s ease; }
+html.sidebar-collapsed .layout { grid-template-columns:var(--sidebar-collapsed-w) 1fr; }
 .main { display:flex; flex-direction:column; min-width:0; }
 .content { flex:1; min-height:0; padding:14px 16px 16px; display:flex; }
 
 /* ═══════════ Sidebar ═══════════ */
 .sidebar {
   background:var(--panel); border-right:1px solid var(--line);
-  display:flex; flex-direction:column; overflow-y:auto;
+  display:flex; flex-direction:column; overflow:hidden;
+  width:var(--sidebar-w); flex-shrink:0; transition:width .22s ease;
 }
+html.sidebar-collapsed .sidebar { width:var(--sidebar-collapsed-w); }
 .sidebar-brand { padding:16px 16px 14px; border-bottom:1px solid var(--line-soft); }
 .brand-row { display:flex; align-items:center; gap:10px; }
 .brand-mark {
@@ -172,6 +175,35 @@ button { font-family:inherit; }
   border-radius:var(--r-sm); cursor:pointer; letter-spacing:.04em;
 }
 .palette-select:hover { color:var(--txt); border-color:var(--faint); }
+
+/* Sidebar toggle button */
+.sidebar-toggle {
+  width:22px; height:22px; border:none; background:none;
+  color:var(--faint); cursor:pointer; border-radius:var(--r-sm);
+  display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; margin-left:auto; transition:color .15s;
+}
+.sidebar-toggle:hover { color:var(--txt); background:var(--panel2); }
+.sidebar-toggle svg { width:12px; height:12px; transition:transform .22s ease; }
+html.sidebar-collapsed .sidebar-toggle svg { transform:rotate(180deg); }
+
+/* Collapsed sidebar content */
+html.sidebar-collapsed .brand-text,
+html.sidebar-collapsed .brand-mark,
+html.sidebar-collapsed .nav-label,
+html.sidebar-collapsed .search-log,
+html.sidebar-collapsed .user-email,
+html.sidebar-collapsed .palette-select { display:none; }
+
+html.sidebar-collapsed .brand-row { justify-content:center; }
+html.sidebar-collapsed .sidebar-toggle { margin-left:0; }
+html.sidebar-collapsed .sidebar-brand { padding:14px 10px; }
+
+html.sidebar-collapsed .nav-section { padding:14px 4px 6px; }
+html.sidebar-collapsed .nav-item { padding:8px 4px; justify-content:center; }
+
+html.sidebar-collapsed .sidebar-footer { flex-direction:column; padding:8px 4px; gap:6px; align-items:center; }
+html.sidebar-collapsed .user-pill { flex:none; padding:4px; }
 
 /* ═══════════ Topbar: the wire ═══════════ */
 .topbar {
