@@ -100,7 +100,7 @@ button { font-family:inherit; }
 ::-webkit-scrollbar-thumb:hover { background:var(--faint); }
 
 /* ═══════════ App shell ═══════════ */
-.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; height:100vh; }
+.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:minmax(0,1fr); height:100vh; }
 .main { display:flex; flex-direction:column; min-width:0; }
 .content { flex:1; min-height:0; padding:14px 16px 16px; display:flex; }
 
