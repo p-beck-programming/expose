@@ -189,15 +189,17 @@ html.sidebar-collapsed .sidebar-toggle svg { transform:rotate(180deg); }
 
 /* Collapsed sidebar content */
 html.sidebar-collapsed .brand-text,
-html.sidebar-collapsed .brand-mark,
 html.sidebar-collapsed .nav-label,
 html.sidebar-collapsed .search-log,
 html.sidebar-collapsed .user-email,
 html.sidebar-collapsed .palette-select { display:none; }
 
 html.sidebar-collapsed .brand-row { justify-content:center; }
-html.sidebar-collapsed .sidebar-toggle { margin-left:0; }
+html.sidebar-collapsed .sidebar-toggle { display:none; }
 html.sidebar-collapsed .sidebar-brand { padding:14px 10px; }
+html.sidebar-collapsed .brand-mark { cursor:pointer; transition:opacity .15s; }
+html.sidebar-collapsed .brand-mark:hover { opacity:.75; }
+html.sidebar-collapsed .nav-label-text { display:none; }
 
 html.sidebar-collapsed .nav-section { padding:14px 4px 6px; }
 html.sidebar-collapsed .nav-item { padding:8px 4px; justify-content:center; }
