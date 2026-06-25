@@ -105,6 +105,9 @@ html.sidebar-collapsed .layout { grid-template-columns:var(--sidebar-collapsed-w
 .main { display:flex; flex-direction:column; min-width:0; }
 .content { flex:1; min-height:0; padding:14px 16px 16px; display:flex; }
 
+/* Mobile bottom tab bar — hidden on desktop, shown in mobile media query below */
+.mobile-tabbar { display:none; }
+
 /* ═══════════ Sidebar ═══════════ */
 .sidebar {
   background:var(--panel); border-right:1px solid var(--line);
@@ -276,4 +279,35 @@ html.sidebar-collapsed .user-pill { flex:none; padding:4px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+}
+
+/* ═══════════ Mobile (≤768px): bottom tab bar shell ═══════════ */
+@media (max-width: 768px) {
+  /* Hide the sidebar; content takes the full width on both shells */
+  .sidebar { display:none; }
+  .layout { grid-template-columns:1fr; }
+
+  /* Fixed bottom tab bar */
+  .mobile-tabbar {
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:120;
+    height:56px; padding-bottom:env(safe-area-inset-bottom);
+    background:var(--panel); border-top:1px solid var(--line);
+  }
+  .mobile-tabbar .tab {
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px; color:var(--faint); text-decoration:none;
+    font-family:var(--font-ui); font-size:9.5px; font-weight:600; letter-spacing:.06em;
+    background:none; border:none; cursor:pointer;
+  }
+  .mobile-tabbar .tab svg { width:18px; height:18px; }
+  .mobile-tabbar .tab.active { color:var(--acc-hi); }
+
+  /* Keep the last of the content clear of the tab bar */
+  .content { padding:12px 12px calc(56px + env(safe-area-inset-bottom)); }
+
+  /* Dashboard topbar: drop non-essential items, tighten spacing */
+  .topbar { padding:0 10px; gap:8px; }
+  .wire { display:none; }
+  .file-article-btn { display:none; }   /* still reachable via the Library tab */
+  .search-wrap { min-width:90px; }
 }
