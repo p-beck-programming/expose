@@ -32,7 +32,6 @@ const Kanban = (() => {
     topics = await TopicService.getTopics();
     renderBoard();
     renderSearchLog();
-    attachWheelHandler();
 
     // Listen for new topics from the overlay
     document.addEventListener('topic:created', async e => {
@@ -55,18 +54,6 @@ const Kanban = (() => {
       }
       fetchTopicData(topic.id);
     });
-  }
-
-  /* ── Wheel: route vertical scroll into col-body, never the board ── */
-  function attachWheelHandler() {
-    const area = document.getElementById('kanban-area');
-    if (!area) return;
-    area.addEventListener('wheel', e => {
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // let horizontal trackpad gestures pass
-      const colBody = e.target.closest('.col-body');
-      e.preventDefault();
-      if (colBody) colBody.scrollTop += e.deltaY;
-    }, { passive: false });
   }
 
   /* ── Fetch subtopics from Gemini ── */
@@ -106,8 +93,8 @@ const Kanban = (() => {
     if (!area) return;
     area.innerHTML = '';
 
-    // Pinned column always first
-    area.appendChild(buildPinnedColumn());
+    // Pinned column first — only when there are pinned subtopics
+    if (TopicService.getPinnedSubtopics(topics).length > 0) area.appendChild(buildPinnedColumn());
 
     if (topics.length === 0) {
       area.appendChild(buildEmptyState());
@@ -124,8 +111,8 @@ const Kanban = (() => {
       area.appendChild(buildColumn(topic));
     });
 
-    // Dossier column always last — filed articles live alongside the topics
-    if (window.Dossier) area.appendChild(Dossier.buildColumn());
+    // Dossier column last — only when there are filed articles
+    if (window.Dossier && ArticleService.count() > 0) area.appendChild(Dossier.buildColumn());
   }
 
   /* ── Render a single column in place ── */
@@ -136,9 +123,16 @@ const Kanban = (() => {
     if (!existing) { renderBoard(); return; }
     const fresh = buildColumn(topic);
     existing.replaceWith(fresh);
-    // Re-render pinned column (pinned subtopics may have changed)
+    // Show/hide pinned column based on whether any subtopics are pinned
+    const pinned = TopicService.getPinnedSubtopics(topics);
     const pinnedCol = document.getElementById('pinned-col');
-    if (pinnedCol) pinnedCol.replaceWith(buildPinnedColumn());
+    if (pinned.length > 0) {
+      const newCol = buildPinnedColumn();
+      if (pinnedCol) pinnedCol.replaceWith(newCol);
+      else document.getElementById('kanban-area')?.prepend(newCol);
+    } else if (pinnedCol) {
+      pinnedCol.remove();
+    }
   }
 
   /* ── Update only the fetching visual state of a column ── */
@@ -609,9 +603,8 @@ const Kanban = (() => {
     const topic = topics.find(t => t.id === topicId);
     const sub   = topic?.subtopics?.find(s => s.id === subtopicId);
     if (sub) sub.pinned = newPinned;
-    // Re-render affected column and pinned col
+    // Re-render affected column; pinned col is handled inside renderColumn
     renderColumn(topicId);
-    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
   }
 
   async function dismissTombstone(topicId, subtopicId) {

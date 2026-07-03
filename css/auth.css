@@ -162,3 +162,9 @@
 }
 .save-toast.visible { opacity: 1; transform: none; }
 .save-toast svg { width: 13px; height: 13px; }
+
+/* ── Mobile (≤768px): comfortable padding on small screens ── */
+@media (max-width: 768px) {
+  .auth-page { padding: 72px 16px 32px; }
+  .auth-card { padding: 26px 20px; }
+}
