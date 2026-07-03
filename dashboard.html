@@ -111,11 +111,11 @@ try {
         </svg>
         New topic
       </button>
-      <button class="file-article-btn" onclick="Dossier.openModal()">
+      <button class="file-article-btn" onclick="Dossier.openModal()" title="File an article to your dossier">
         <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="10" height="10">
           <path d="M1 3.5h4l1 1.5h5v5.5H1z"/>
         </svg>
-        File article
+        ADD+
       </button>
       <div class="search-wrap">
         <span class="search-ico">
@@ -229,7 +229,7 @@ try {
                 onkeydown="if(event.key==='Enter'){event.preventDefault();Overlay.addSource('rss')}"/>
               <button class="source-add-btn" onclick="Overlay.addSource('rss')">+ Add</button>
             </div>
-            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Any RSS or Atom feed URL — news sites, blogs, gov/police feeds</div>
+            <div class="saved-hint"><svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="4.5"/><line x1="5.5" y1="3.5" x2="5.5" y2="6"/><circle cx="5.5" cy="7.5" r="0.4" fill="currentColor"/></svg>Any RSS or Atom feed URL — news sites, blogs, gov/police feeds. <a href="https://aboutfeeds.com/" target="_blank" rel="noopener" style="color:var(--acc-hi);text-decoration:none">Where to find RSS feeds ↗</a></div>
             <div class="source-tags" id="rss-tags"></div>
           </div>
         </div>
@@ -375,6 +375,7 @@ try {
       <div class="edit-sources-label">
         <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.39 12.61 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83C13.9 14.45 9.55 10.1 4 10.1z"/></svg>
         RSS feed
+        <a href="https://aboutfeeds.com/" target="_blank" rel="noopener" style="margin-left:auto;font-size:10px;font-weight:500;color:var(--acc-hi);text-decoration:none" title="What RSS feeds are and where to find them">Where to find feeds ↗</a>
       </div>
       <div class="edit-source-tags" id="edit-rss-tags"></div>
       <div class="edit-source-input-row">
@@ -463,6 +464,7 @@ try {
 
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/worldmap.js"></script>
 <script src="js/topic.service.js"></script>
 <script src="js/article.service.js"></script>
 <script src="js/gemini.service.js"></script>
@@ -557,6 +559,7 @@ loadUser();
 initPaletteSelect();
 initSuggestions();
 Kanban.init();
+WorldMap.mount();
 
 function handleLogout() {
   AuthService.logout();

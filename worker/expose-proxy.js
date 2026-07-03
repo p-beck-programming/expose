@@ -1,5 +1,5 @@
 /**
- * Exposé proxy — Worker v5 (broad-search rate-limit hardening)
+ * Exposé proxy — Worker v6 (rate-limit resilience: 429 backoff + stale fallback + 7-day window)
  * Paste over the existing Worker code in the Cloudflare editor and Deploy.
  *
  * Endpoints (unchanged shape — gemini.service.js consumes the same item shape):
@@ -9,28 +9,28 @@
  *                   feed (youtube.com/feeds/videos.xml?channel_id=…) and parse it
  * All feed types share one parser (parseFeed) for RSS <item> and Atom <entry>.
  *
- * WHY v5: v4's broad-search "merge" mode called BOTH news backends on every broad
- * query, which slammed GDELT (it rate-limits hard per-IP, and Workers share egress
- * IPs) → near-constant 429, so broad-only topics consistently errored. v5 fixes the
- * reliability without losing depth/diversity:
+ * WHY v6: users hitting "news providers are limiting rates" saw most sources fail
+ * with no recourse — retrying immediately just re-triggered the same 429s. v6:
  *
- *   • ?type=news&merge=1 (BROAD mode) is now Google-FIRST: Google News RSS is itself
- *     a multi-publisher aggregator, so it usually returns a deep, diverse pool alone.
- *     GDELT is only called when Google is down or returns < BROAD_MIN items, then the
- *     two are merged + deduped. GDELT is back to a rare, as-needed call.
- *   • Retry (fetchWithRetry) now retries ONLY 502/503/504 + network errors — never
- *     429 (its window is seconds, so sub-second retries just guarantee another 429).
- *   • Response caching (caches.default, NEWS_TTL): successful payloads are cached by
- *     request URL so repeated refreshes hit cache instead of upstream. Errors are
- *     never cached, so a genuine failure still retries on the next refresh.
+ *   • 429 IS now retried — exactly once, after a 1.5–2.2s pause (the rate window is
+ *     seconds; one properly-spaced retry usually clears it, while v5's policy of
+ *     never retrying guaranteed a failed sweep). 502/503/504 keep the fast retries.
+ *   • STALE FALLBACK: every successful payload is also cached in a long-lived
+ *     "stale" slot (STALE_TTL, 6h). When an upstream fails after retries, the
+ *     Worker serves the last good payload for that exact query (marked
+ *     `stale:true`, backend suffixed "(stale)") instead of an error. A spammed
+ *     retry now degrades to slightly-old news instead of a dead column.
+ *   • Default GDELT window widened 3d → 7d to match the app's new 7-day recency
+ *     (client sends when=7d; this covers requests that omit it).
  *
- * v4 (RSS + YouTube sources, Reddit removed): replaced Reddit (403-blocked unauth
- * JSON) with the keyless ?type=rss and ?type=youtube endpoints above.
+ * v5: broad merge mode made Google-first, GDELT on-demand; success caching (NEWS_TTL).
+ * v4: RSS + YouTube source endpoints, Reddit removed.
  */
 
 const PRIMARY = "google"; // "google" | "gdelt" — which news backend to try first
 const BROAD_MIN = 10;     // broad mode: only reach for GDELT if Google returns fewer than this
 const NEWS_TTL = 600;     // seconds to cache successful feed responses (caches.default)
+const STALE_TTL = 21600;  // seconds to keep the long-lived stale copy used when upstreams fail (6h)
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -58,6 +58,8 @@ export default {
     // keyed by the full request URL, which is stable for a given broad query.
     const cache    = caches.default;
     const cacheKey = new Request(url.toString(), { method: "GET" });
+    // Second, long-lived slot for the same query — only consulted when upstreams fail.
+    const staleKey = new Request(url.toString() + "&__stale=1", { method: "GET" });
     const hit      = await cache.match(cacheKey);
     if (hit) return hit;
 
@@ -68,7 +70,7 @@ export default {
       else if (type === "youtube") res = await handleYouTube(url);
       else res = json({ ok: false, type, error: "unknown_type" }, 400);
     } catch (err) {
-      return json({ ok: false, type, error: "proxy_failure", detail: String(err) }, 502);
+      res = json({ ok: false, type, error: "proxy_failure", detail: String(err) }, 502);
     }
 
     // Cache only successful payloads. json() returns HTTP 200 even for ok:false,
@@ -76,13 +78,21 @@ export default {
     try {
       const data = await res.clone().json();
       if (data && data.ok) {
-        const cached = new Response(JSON.stringify(data), {
-          status: 200,
-          headers: { ...CORS, "Content-Type": "application/json; charset=utf-8",
-                     "Cache-Control": `public, max-age=${NEWS_TTL}` },
-        });
-        const put = cache.put(cacheKey, cached);
+        const put = Promise.all([
+          cache.put(cacheKey, cacheable(data, NEWS_TTL)),
+          cache.put(staleKey, cacheable(data, STALE_TTL)),
+        ]);
         if (ctx && ctx.waitUntil) ctx.waitUntil(put); else await put;
+      } else {
+        // Upstream failed even after retries — fall back to the last good payload
+        // for this exact query, if we have one. Slightly-old news beats no news.
+        const stale = await cache.match(staleKey);
+        if (stale) {
+          const old = await stale.json();
+          old.stale = true;
+          old.backend = (old.backend || "cache") + "(stale)";
+          return json(old);
+        }
       }
     } catch { /* non-JSON / unreadable — skip caching */ }
 
@@ -223,8 +233,8 @@ async function fetchGdelt(q, when, limit) {
   }
   const gdeltQuery = parts.join(" ");
 
-  // timespan: <n>min|h|d|w|m. Default 3d to mirror the app's window.
-  const timespan = /^\d+(min|h|d|w|m)$/.test(when) ? when : "3d";
+  // timespan: <n>min|h|d|w|m. Default 7d to mirror the app's window.
+  const timespan = /^\d+(min|h|d|w|m)$/.test(when) ? when : "7d";
 
   const apiUrl =
     `https://api.gdeltproject.org/api/v2/doc/doc` +
@@ -492,19 +502,29 @@ function decodeGoogleLink(link) {
 
 /* ================= small helpers ================= */
 
-// Retry only server-transient statuses (502/503/504) and network errors.
-// We deliberately do NOT retry 429: its rate-limit window is seconds, so a
-// sub-second retry just guarantees another 429 and hammers the upstream. On 429
-// we return immediately and let the other backend / response cache cover it.
+// Retry policy:
+//   502/503/504 + network errors → fast retries (baseMs backoff), up to `retries`.
+//   429 → ONE retry after a 1.5–2.2s pause. The rate window is seconds, so a
+//   sub-second retry guarantees another 429 — but one properly-spaced retry
+//   usually clears it. More than one just hammers the upstream for nothing.
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
 async function fetchWithRetry(url, opts, { retries = 2, baseMs = 700 } = {}) {
   let lastErr;
+  let tried429 = false;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) {
       await new Promise(r => setTimeout(r, baseMs * attempt + Math.floor(Math.random() * 300)));
     }
     try {
       const res = await fetch(url, opts);
+      if (res.status === 429 && !tried429) {
+        tried429 = true;
+        await new Promise(r => setTimeout(r, 1500 + Math.floor(Math.random() * 700)));
+        const retry = await fetch(url, opts);
+        if (retry.ok || attempt === retries) return retry;
+        if (!RETRYABLE_STATUS.has(retry.status)) return retry;
+        continue;
+      }
       if (res.ok || !RETRYABLE_STATUS.has(res.status) || attempt === retries) return res;
     } catch (err) {
       lastErr = err;
@@ -538,5 +558,14 @@ function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: { ...CORS, "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
+// A Response suitable for caches.default — max-age controls how long it lives.
+function cacheable(data, ttl) {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { ...CORS, "Content-Type": "application/json; charset=utf-8",
+               "Cache-Control": `public, max-age=${ttl}` },
   });
 }

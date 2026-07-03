@@ -323,6 +323,14 @@ const Kanban = (() => {
     card.id = `card-${sub.id}`;
     card.setAttribute('data-subtopic-id', sub.id);
     card.setAttribute('data-topic-id', topicId);
+    card.title = 'Double-click for full view';
+
+    // Double-click anywhere on the card (except links/buttons) → full-screen view
+    card.addEventListener('dblclick', e => {
+      if (e.target.closest('a, button')) return;
+      e.preventDefault();
+      openFullscreen(sub.id, topicId);
+    });
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
 
@@ -850,8 +858,8 @@ const Kanban = (() => {
       <div class="log-item" onclick="Kanban.rerunSearch('${entry.id}', '${esc(entry.query)}', '${esc(entry.topicName)}')">
         <div class="log-dot"></div>
         <div class="log-content">
-          <div class="log-query">${esc(entry.query)}</div>
-          <div class="log-time">${timeAgo(entry.createdAt)}</div>
+          <div class="log-query" title="${esc(entry.query)}">${esc(entry.query)}</div>
+          <div class="log-time">${timeAgo(entry.createdAt)} — ${clockTime(entry.createdAt)}</div>
         </div>
       </div>`).join('');
   }
@@ -913,6 +921,12 @@ const Kanban = (() => {
     if (d < 3600)  return `${Math.floor(d / 60)}m ago`;
     if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
     return `${Math.floor(d / 86400)}d ago`;
+  }
+  /* Wall-clock time of a log entry, e.g. "4:32 PM" */
+  function clockTime(iso) {
+    const t = new Date(iso);
+    if (isNaN(t)) return '';
+    return t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
   }
   function dragIcon() {
     return `<svg viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2.5" r="1"/><circle cx="7" cy="2.5" r="1"/><circle cx="3" cy="5" r="1"/><circle cx="7" cy="5" r="1"/><circle cx="3" cy="7.5" r="1"/><circle cx="7" cy="7.5" r="1"/></svg>`;

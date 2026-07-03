@@ -172,12 +172,9 @@ html, body { height: 100%; overflow: hidden; }
           <div class="section-card-row">
             <div>
               <div class="row-label">Appearance</div>
-              <div class="row-hint">Switch between light and dark mode.</div>
+              <div class="row-hint">Pick a palette — Daybreak is the light theme. Applies to every page.</div>
             </div>
-            <select class="select" id="theme-select" style="width:140px" onchange="setTheme(this.value)">
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
+            <select class="select" id="theme-select" style="width:140px" onchange="setTheme(this.value)"></select>
           </div>
 
           <div class="section-card-row">
@@ -325,9 +322,14 @@ function init() {
     rateSelect.value = String(settings.refreshRate || 60);
   }
 
-  // Theme select
+  // Theme select — lists the real palettes (the old Light/Dark values weren't
+  // palette ids, so Theme.apply silently fell back to the default every time).
   const themeSelect = document.getElementById('theme-select');
-  if (themeSelect) themeSelect.value = settings.theme || 'light';
+  if (themeSelect) {
+    themeSelect.innerHTML = Theme.list()
+      .map(p => `<option value="${p.id}">${p.label}${p.id === 'daybreak' ? ' (light)' : ''}</option>`).join('');
+    themeSelect.value = Theme.get();
+  }
 
   // Toggles
   setToggle('expand-toggle', settings.expandTopics !== false);
@@ -378,9 +380,9 @@ async function toggleSetting(key, toggleId) {
   showToast();
 }
 
-function setTheme(theme) {
-  Theme.apply(theme);
-  saveSetting('theme', theme);
+function setTheme(palette) {
+  Theme.set(palette); // applies + persists (localStorage and the account record)
+  showToast();
 }
 
 async function toggleNotifications() {

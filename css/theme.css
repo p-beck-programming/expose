@@ -141,7 +141,13 @@ button { font-family:inherit; }
 .log-list { overflow-y:auto; flex:1; }
 .log-entry { padding:7px 8px; border-radius:var(--r-sm); }
 .log-entry:hover { background:var(--panel2); }
-.log-query { font-family:var(--font-mono); font-size:11px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.log-item { display:flex; align-items:flex-start; gap:6px; padding:4px 8px; border-radius:var(--r-sm); cursor:pointer; }
+.log-item:hover { background:var(--panel2); }
+.log-item:hover .log-query { color:var(--txt); }
+.log-dot { width:4px; height:4px; border-radius:50%; background:var(--acc); opacity:.65; flex-shrink:0; margin-top:5px; }
+.log-content { flex:1; min-width:0; }
+.log-query { font-family:var(--font-mono); font-size:10px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.log-time { font-family:var(--font-mono); font-size:8.5px; color:var(--faint); margin-top:1px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .log-meta { font-family:var(--font-mono); font-size:9.5px; color:var(--faint); margin-top:2px; }
 .log-empty { text-align:center; padding:22px 8px; color:var(--faint); }
 .log-empty-ring { width:30px; height:30px; margin:0 auto 8px; border:1px solid var(--line); border-radius:50%; display:flex; align-items:center; justify-content:center; }

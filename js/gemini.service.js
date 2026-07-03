@@ -1,5 +1,11 @@
 /* ═══════════════════════════════════════════════
-   EXPOSÉ — gemini.service.js  (v3: feed-first pipeline)
+   EXPOSÉ — gemini.service.js  (v3.1: feed-first pipeline + rate-limit resilience)
+
+   v3.1 (rate-limit hardening, pairs with Worker v6):
+     - 7-day feed window (RECENCY '7d', was 3d/"72h")
+     - plan launches staggered 300ms apart (parallel bursts trip Google's limiter)
+     - one client-side retry round for failed sources after 1.8s
+     - NO_RESULTS errors now name each failing source + status inline
 
    ARCHITECTURE CHANGE FROM v2:
    v2 asked Gemini (with Google Search grounding) to both FIND
@@ -51,8 +57,11 @@ const GeminiService = (() => {
   const MIN_SUBTOPICS = 2;    // floor for the per-topic subtopic cap
   const MAX_SUBTOPICS_CAP = 6;// ceiling for the per-topic subtopic cap
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
-  const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
+  const RECENCY       = '7d'; // feed window — one week (was 3d/72h; too tight for slow-burn topics)
   const PER_QUERY     = 8;    // items requested per source query
+  const FETCH_STAGGER = 300;  // ms between plan launches — a parallel burst of 6 Google News
+                              // queries from one IP is exactly what trips their rate limiter
+  const RETRY_DELAY   = 1800; // ms before the one client-side retry of failed plans
   const BROAD_LIMIT   = 20;   // legacy: deep pool for the broad-merge fallback (plans.length===0)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
 
@@ -160,12 +169,35 @@ const GeminiService = (() => {
     return plans;
   }
 
+  const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Launch plans with a small stagger instead of one parallel burst — Google News
+  // rate-limits per-IP, and 6 simultaneous queries is the classic trigger.
+  function _launchPlans(plans) {
+    return Promise.allSettled(
+      plans.map((p, i) => _sleep(i * FETCH_STAGGER).then(() => fetch(p.url)).then(r => r.json()))
+    );
+  }
+
   async function _fetchItems(topicName, rotated) {
     const plans = _buildPlans(topicName, rotated);
 
-    const results = await Promise.allSettled(
-      plans.map(p => fetch(p.url).then(r => r.json()))
-    );
+    const results = await _launchPlans(plans);
+    const bodies  = plans.map((_, i) => results[i].status === 'fulfilled' ? results[i].value : null);
+
+    // ONE retry round for whatever failed, after a pause — by then the upstream
+    // rate window has usually rolled over, and the Worker's stale cache can also
+    // answer. This is what makes "spam the retry button" unnecessary.
+    const failedIdx = plans.map((_, i) => i).filter(i => !(bodies[i] && bodies[i].ok));
+    if (failedIdx.length > 0) {
+      await _sleep(RETRY_DELAY);
+      const retryResults = await _launchPlans(failedIdx.map(i => plans[i]));
+      failedIdx.forEach((planIdx, j) => {
+        const rb = retryResults[j].status === 'fulfilled' ? retryResults[j].value : null;
+        if (rb && rb.ok) bodies[planIdx] = rb;
+        else if (rb && !bodies[planIdx]) bodies[planIdx] = rb; // keep the more descriptive error
+      });
+    }
 
     const sourceReport = [];
     const queriesUsed  = [];
@@ -173,11 +205,12 @@ const GeminiService = (() => {
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
-      const body = results[i].status === 'fulfilled' ? results[i].value : null;
+      const body = bodies[i];
       queriesUsed.push(plan.query);
 
       if (body && body.ok) {
-        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length, backend: body.backend || '' });
+        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length,
+                            backend: body.backend || '', stale: !!body.stale });
         // Tag each item with the plan kind so bucketing is reliable downstream.
         body.items.forEach(it => { it._kind = plan.kind; });
         all = all.concat(body.items);
@@ -348,21 +381,21 @@ Rules:
     const cap = _clampSubs(topic.maxSubtopics);
 
     if (items.length === 0) {
-      // per-source failure detail surfaced for diagnosability (console only)
+      // Per-source failure detail — surfaced to the user now, not just the console.
       const failed = sourceReport.filter(r => r.count === 0);
       const dead = failed
         .map(r => `${r.source} (${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ');
       console.debug('[Exposé] no items — failures:', dead || 'no sources configured');
-      // If every failure is a transient upstream rate-limit/outage, say so softly
-      // rather than dumping raw HTTP codes — a blip shouldn't read as a hard error.
       const allTransient = failed.length > 0 && failed.every(r =>
         r.status === 'upstream_error' || /\b(429|502|503|504)\b/.test(r.detail || ''));
       return {
         success: false,
         error:   'NO_RESULTS',
+        sourceReport,
         message: allTransient
-          ? 'News providers are briefly rate-limiting — Exposé will retry on the next refresh.'
-          : `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
+          ? `News providers are rate-limiting (${failed.length}/${sourceReport.length} sources failed: ${dead}). ` +
+            `Exposé already retried each source once and checked its cache — wait ~2 minutes before retrying, or add RSS feeds (they are never rate-limited).`
+          : `No items found in the last 7 days. Per source: ${dead || 'no sources configured'}.`,
       };
     }
 
@@ -377,7 +410,7 @@ Rules:
         return {
           success: false,
           error:   'NO_RESULTS',
-          message: `No items from your listed sites in the last 72h (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
+          message: `No items from your listed sites in the last 7 days (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
         };
       }
     }

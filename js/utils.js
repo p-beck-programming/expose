@@ -39,6 +39,11 @@ const Theme = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       s.palette = palette;
       localStorage.setItem('expose_settings_v1', JSON.stringify(s));
+      // Also persist into the account record (fire-and-forget) so the palette
+      // survives logout/login — the session-store copy alone gets rebuilt then.
+      if (window.AuthService?.isAuthenticated?.()) {
+        AuthService.updateSettings({ palette }).catch?.(() => {});
+      }
     } catch {}
     return palette;
   }
