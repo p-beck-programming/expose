@@ -26,7 +26,7 @@ try {
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="brand-row">
-        <div class="brand-mark">
+        <div class="brand-mark" onclick="Sidebar.expand()" title="Expand sidebar">
           <svg viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <circle cx="8.5" cy="8.5" r="6.5"/>
             <circle cx="8.5" cy="8.5" r="2.5"/>
@@ -40,6 +40,11 @@ try {
           <div class="brand-name">EXPOSÉ</div>
           <div class="brand-sub">SIGNALS MONITOR</div>
         </div>
+        <button class="sidebar-collapse-btn" onclick="Sidebar.toggle()" title="Collapse sidebar">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="7,2 3,6 7,10"/><line x1="10" y1="2" x2="10" y2="10"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -517,15 +522,6 @@ function initSuggestions() {
   });
 }
 
-/* Palette switcher */
-function initPaletteSelect() {
-  const sel = document.getElementById('palette-select');
-  if (!sel) return;
-  sel.innerHTML = Theme.list().map(p => `<option value="${p.id}">${p.label}</option>`).join('');
-  sel.value = Theme.get();
-  sel.onchange = () => Theme.set(sel.value);
-}
-
 /* Search (client-side filter) */
 function handleSearch(query) {
   const q = query.toLowerCase().trim();
@@ -541,30 +537,14 @@ async function refreshAll() {
   topics.filter(t => !t.paused).forEach(t => Kanban.fetchTopicData(t.id));
 }
 
-/* Load saved user */
-function loadUser() {
-  try {
-    const session = JSON.parse(localStorage.getItem('expose_session_v1'));
-    if (session?.email) {
-      document.getElementById('user-email').textContent = session.email;
-      document.getElementById('user-avatar').textContent = session.email[0].toUpperCase();
-    }
-  } catch {}
-}
-
-/* Boot */
+/* Boot — SidebarUI (utils.js) wires collapse, palette select, user pill,
+   query log, and the mobile bottom nav */
 Theme.init();
 Router.requireAuth();
-loadUser();
-initPaletteSelect();
+SidebarUI.init('dashboard');
 initSuggestions();
 Kanban.init();
 WorldMap.mount();
-
-function handleLogout() {
-  AuthService.logout();
-  window.location.replace('index.html');
-}
 </script>
 </body>
 </html>

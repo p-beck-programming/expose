@@ -106,8 +106,10 @@ button { font-family:inherit; }
 
 /* ═══════════ Sidebar ═══════════ */
 .sidebar {
+  width:var(--sidebar-w); flex-shrink:0;
   background:var(--panel); border-right:1px solid var(--line);
   display:flex; flex-direction:column; overflow-y:auto;
+  transition:width var(--t-base);
 }
 .sidebar-brand { padding:16px 16px 14px; border-bottom:1px solid var(--line-soft); }
 .brand-row { display:flex; align-items:center; gap:10px; }
@@ -179,6 +181,38 @@ button { font-family:inherit; }
 }
 .palette-select:hover { color:var(--txt); border-color:var(--faint); }
 
+/* ── Sidebar collapse ──
+   Toggled via body.sidebar-collapsed (Sidebar in utils.js). The rail keeps
+   only the brand mark (which reopens it) and the nav/footer icons. */
+.sidebar-collapse-btn {
+  margin-left:auto; width:22px; height:22px; flex-shrink:0;
+  border:1px solid transparent; border-radius:var(--r-sm);
+  background:none; color:var(--faint); cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+}
+.sidebar-collapse-btn:hover { color:var(--txt); border-color:var(--line); }
+.sidebar-collapse-btn svg { width:12px; height:12px; }
+
+body.sidebar-collapsed { --sidebar-w:58px; }
+body.sidebar-collapsed .brand-name,
+body.sidebar-collapsed .brand-sub,
+body.sidebar-collapsed .nav-label,
+body.sidebar-collapsed .search-log,
+body.sidebar-collapsed .user-email,
+body.sidebar-collapsed .palette-select,
+body.sidebar-collapsed .sidebar-collapse-btn { display:none; }
+body.sidebar-collapsed .sidebar-brand { padding:16px 0 14px; }
+body.sidebar-collapsed .brand-row { justify-content:center; }
+body.sidebar-collapsed .brand-mark { cursor:pointer; }
+body.sidebar-collapsed .brand-mark:hover { background:var(--acc-hi); }
+body.sidebar-collapsed .nav-section { padding:14px 8px 6px; }
+body.sidebar-collapsed .nav-item { justify-content:center; gap:0; padding:10px 0; font-size:0; }
+body.sidebar-collapsed .nav-item svg { width:16px; height:16px; }
+body.sidebar-collapsed .nav-item.active { border-left-color:transparent; border-radius:var(--r-md); }
+body.sidebar-collapsed .search-log ~ .sidebar-footer,
+body.sidebar-collapsed .sidebar-footer { flex-direction:column; gap:8px; padding:10px 6px; margin-top:auto; }
+body.sidebar-collapsed .user-pill { justify-content:center; padding:5px 0; width:100%; flex:0 0 auto; }
+
 /* ═══════════ Topbar: the wire ═══════════ */
 .topbar {
   height:var(--topbar-h); flex-shrink:0;
@@ -245,6 +279,50 @@ button { font-family:inherit; }
 .btn-primary:hover { background:var(--acc-hi); border-color:var(--acc-hi); }
 .btn-ghost { background:none; }
 .btn-sm { padding:6px 12px; font-size:11px; }
+
+/* ═══════════ Mobile bottom nav (Apple-style tab bar) ═══════════
+   Injected by MobileNav (utils.js) on app pages; CSS shows it ≤768px. */
+.mobile-nav { display:none; }
+
+@media (max-width: 768px) {
+  /* Sidebar goes away — the bottom bar is the navigation */
+  .sidebar { display:none; }
+  .layout { grid-template-columns:1fr; height:100vh; height:100dvh; }
+  .app-layout { height:100vh; height:100dvh; }
+
+  /* Topbar: pinned at the top, wraps its tools, drops the wire ticker */
+  .topbar {
+    position:sticky; top:0; z-index:60;
+    flex-wrap:wrap; height:auto; min-height:var(--topbar-h);
+    padding:8px 10px; gap:8px; row-gap:8px;
+  }
+  .wire { display:none; }
+  .search-wrap { order:5; flex-basis:100%; width:100%; max-width:none !important; }
+  .topbar-right { margin-left:auto; }
+
+  /* Content scrolls vertically; leave room for the tab bar */
+  .content { padding:10px 10px calc(76px + env(safe-area-inset-bottom)); }
+  .settings-main .settings-layout { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+  .lib-content { padding-bottom:calc(84px + env(safe-area-inset-bottom)) !important; }
+
+  .mobile-nav {
+    display:flex; justify-content:space-around; align-items:stretch;
+    position:fixed; left:0; right:0; bottom:0; z-index:400;
+    background:var(--panel); border-top:1px solid var(--line);
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 18px rgba(0,0,0,.25);
+  }
+  .mobile-nav-item {
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    flex:1; padding:5px 0 3px; border-radius:var(--r-md);
+    color:var(--faint); text-decoration:none;
+    font-family:var(--font-ui); font-size:9.5px; font-weight:600; letter-spacing:.1em;
+    text-transform:uppercase;
+  }
+  .mobile-nav-item svg { width:19px; height:19px; }
+  .mobile-nav-item.active { color:var(--acc-hi); }
+  .mobile-nav-item:active { background:var(--panel2); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }

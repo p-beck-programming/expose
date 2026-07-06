@@ -57,15 +57,19 @@ const Kanban = (() => {
     });
   }
 
-  /* ── Wheel: route vertical scroll into col-body, never the board ── */
+  /* ── Wheel: hovering anywhere over a column scrolls that column's body;
+        over empty board space the wheel pans the board horizontally. ── */
   function attachWheelHandler() {
     const area = document.getElementById('kanban-area');
     if (!area) return;
     area.addEventListener('wheel', e => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // let horizontal trackpad gestures pass
-      const colBody = e.target.closest('.col-body');
+      if (window.matchMedia('(max-width: 768px)').matches) return; // mobile: native vertical scroll
+      const colBody = e.target.closest('.col-body')
+                   || e.target.closest('.kanban-col')?.querySelector('.col-body');
       e.preventDefault();
       if (colBody) colBody.scrollTop += e.deltaY;
+      else area.scrollLeft += e.deltaY;
     }, { passive: false });
   }
 
@@ -74,10 +78,11 @@ const Kanban = (() => {
     const topic = topics.find(t => t.id === topicId);
     if (!topic) return;
 
-    // Set fetching state
+    // Set fetching state and re-render immediately — the column shows skeletons
+    // (or dims its cards) so Retry visibly does something the moment it's clicked.
     await TopicService.updateTopic(topicId, { status: 'fetching' });
     topic.status = 'fetching';
-    updateColFetchingState(topicId, true);
+    renderColumn(topicId);
 
     const result = await GeminiService.fetchSubtopics(topic);
     if (result && result.sourceReport && window.Wire) Wire.update(result.sourceReport);
@@ -95,7 +100,6 @@ const Kanban = (() => {
       topic.errorMessage = errorMessage;
     }
 
-    updateColFetchingState(topicId, false);
     renderColumn(topicId);
     renderSearchLog();
   }
@@ -139,15 +143,6 @@ const Kanban = (() => {
     // Re-render pinned column (pinned subtopics may have changed)
     const pinnedCol = document.getElementById('pinned-col');
     if (pinnedCol) pinnedCol.replaceWith(buildPinnedColumn());
-  }
-
-  /* ── Update only the fetching visual state of a column ── */
-  function updateColFetchingState(topicId, isFetching) {
-    const col = document.getElementById(`col-${topicId}`);
-    if (!col) return;
-    col.querySelectorAll('.subtopic-card').forEach(c => {
-      c.classList.toggle('fetching', isFetching);
-    });
   }
 
   /* ════════════════════════════════
@@ -834,34 +829,10 @@ const Kanban = (() => {
      SEARCH LOG SIDEBAR
   ════════════════════════════════ */
 
+  /* Shared renderer lives in utils.js (SidebarLog) so every page's sidebar
+     shows the same log; here it stays interactive because window.Kanban exists. */
   async function renderSearchLog() {
-    const log  = await TopicService.getSearchLog();
-    const list = document.getElementById('log-list');
-    if (!list) return;
-
-    if (log.length === 0) {
-      list.innerHTML = `
-        <div class="log-empty">
-          <div class="log-empty-ring">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-              <circle cx="7" cy="7" r="5.5"/>
-              <line x1="7" y1="4.5" x2="7" y2="7.5"/>
-              <circle cx="7" cy="9.5" r="0.5" fill="currentColor"/>
-            </svg>
-          </div>
-          <div class="log-empty-text">No searches yet.<br/>Add a topic to begin.</div>
-        </div>`;
-      return;
-    }
-
-    list.innerHTML = log.slice(0, 30).map(entry => `
-      <div class="log-item" onclick="Kanban.rerunSearch('${entry.id}', '${esc(entry.query)}', '${esc(entry.topicName)}')">
-        <div class="log-dot"></div>
-        <div class="log-content">
-          <div class="log-query" title="${esc(entry.query)}">${esc(entry.query)}</div>
-          <div class="log-time">${timeAgo(entry.createdAt)} — ${clockTime(entry.createdAt)}</div>
-        </div>
-      </div>`).join('');
+    SidebarLog.render();
   }
 
   async function rerunSearch(logId, query, topicName) {
@@ -915,19 +886,6 @@ const Kanban = (() => {
 
   function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
   function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-  function timeAgo(iso) {
-    const d = (Date.now() - new Date(iso)) / 1000;
-    if (d < 60)    return 'just now';
-    if (d < 3600)  return `${Math.floor(d / 60)}m ago`;
-    if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-    return `${Math.floor(d / 86400)}d ago`;
-  }
-  /* Wall-clock time of a log entry, e.g. "4:32 PM" */
-  function clockTime(iso) {
-    const t = new Date(iso);
-    if (isNaN(t)) return '';
-    return t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
-  }
   function dragIcon() {
     return `<svg viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2.5" r="1"/><circle cx="7" cy="2.5" r="1"/><circle cx="3" cy="5" r="1"/><circle cx="7" cy="5" r="1"/><circle cx="3" cy="7.5" r="1"/><circle cx="7" cy="7.5" r="1"/></svg>`;
   }
