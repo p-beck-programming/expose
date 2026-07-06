@@ -330,15 +330,17 @@ const Kanban = (() => {
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
 
     // Source bubbles
-    const webCount = (sub.sources?.web     || []).length;
-    const rssCount = (sub.sources?.rss     || []).length;
-    const ytCount  = (sub.sources?.youtube || []).length;
+    const webCount    = (sub.sources?.web     || []).length;
+    const rssCount    = (sub.sources?.rss     || []).length;
+    const ytCount     = (sub.sources?.youtube || []).length;
+    const redditCount = (sub.sources?.reddit  || []).length;
     const bubbles = [
-      webCount > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
-      rssCount > 0 ? `<span class="source-bubble rss-bubble">${rssSvg(9)}${rssCount}</span>` : '',
-      ytCount  > 0 ? `<span class="source-bubble youtube-bubble">${youtubeSvg(9)}${ytCount}</span>` : '',
+      webCount    > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
+      rssCount    > 0 ? `<span class="source-bubble rss-bubble">${rssSvg(9)}${rssCount}</span>` : '',
+      ytCount     > 0 ? `<span class="source-bubble youtube-bubble">${youtubeSvg(9)}${ytCount}</span>` : '',
+      redditCount > 0 ? `<span class="source-bubble reddit-bubble">${redditSvg(9)}${redditCount}</span>` : '',
     ].join('');
-    const totalSources = webCount + rssCount + ytCount;
+    const totalSources = webCount + rssCount + ytCount + redditCount;
 
     card.innerHTML = `
       <div class="card-header" onclick="Kanban.toggleCard('${sub.id}', '${topicId}', event)">
@@ -396,6 +398,7 @@ const Kanban = (() => {
       { key: 'web',     label: 'Web',     iconCls: 'web-icon-sm',     icon: webSvg(10) },
       { key: 'rss',     label: 'RSS',     iconCls: 'rss-icon-sm',     icon: rssSvg(10) },
       { key: 'youtube', label: 'YouTube', iconCls: 'youtube-icon-sm', icon: youtubeSvg(10) },
+      { key: 'reddit',  label: 'Reddit',  iconCls: 'reddit-icon-sm',  icon: redditSvg(10) },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -740,7 +743,7 @@ const Kanban = (() => {
     if (!overlay || !body) return;
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
-    const totalSrc   = (sub.sources?.web?.length || 0) + (sub.sources?.rss?.length || 0) + (sub.sources?.youtube?.length || 0);
+    const totalSrc   = (sub.sources?.web?.length || 0) + (sub.sources?.rss?.length || 0) + (sub.sources?.youtube?.length || 0) + (sub.sources?.reddit?.length || 0);
 
     body.innerHTML = `
       <div class="fullscreen-identifier">${esc(topic?.name || 'Topic')}</div>
@@ -775,6 +778,7 @@ const Kanban = (() => {
       { key: 'web',     label: 'Web sources' },
       { key: 'rss',     label: 'RSS feeds' },
       { key: 'youtube', label: 'YouTube' },
+      { key: 'reddit',  label: 'Reddit' },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -904,6 +908,9 @@ const Kanban = (() => {
   function webSvg(size = 12) {
     return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="${size}" height="${size}"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>`;
   }
+  function redditSvg(size = 12) {
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="${size}" height="${size}"><circle cx="12" cy="14" r="7"/><circle cx="9.5" cy="13.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="13.5" r="1.1" fill="currentColor" stroke="none"/><path d="M9 16.8c1 .8 2 1.1 3 1.1s2-.3 3-1.1"/><line x1="12" y1="7" x2="14" y2="3.8"/><circle cx="14.6" cy="3.4" r="1.1" fill="currentColor" stroke="none"/></svg>`;
+  }
 
   function removeTopicFromBoard(topicId) {
     topics = topics.filter(t => t.id !== topicId);
@@ -941,7 +948,7 @@ window.Kanban = Kanban;
 const ColMenu = (() => {
   let _pendingAction = null; // { type, topicId }
   let _editTopicId   = null;
-  let _editSources   = { web: [], rss: [], youtube: [] };
+  let _editSources   = { web: [], rss: [], youtube: [], reddit: [] };
   let _editStrict    = false;
   let _editBroad     = false;
   let _editMaxSubs   = 3;
@@ -1114,6 +1121,7 @@ const ColMenu = (() => {
       web:     [...(topic.sources?.web     || [])],
       rss:     [...(topic.sources?.rss     || [])],
       youtube: [...(topic.sources?.youtube || [])],
+      reddit:  [...(topic.sources?.reddit  || [])],
     };
     _editStrict  = !!topic.strictMode;
     _editBroad   = !!topic.allSourcesEnabled;
@@ -1126,7 +1134,7 @@ const ColMenu = (() => {
     syncEditStrictUI();
     syncEditBroadUI();
     syncEditStepperUI();
-    ['web','rss','youtube'].forEach(t => {
+    ['web','rss','youtube','reddit'].forEach(t => {
       const el = document.getElementById(`edit-${t}-input`);
       if (el) el.value = '';
     });
@@ -1169,7 +1177,7 @@ const ColMenu = (() => {
   }
 
   function renderEditTags() {
-    ['web','rss','youtube'].forEach(type => {
+    ['web','rss','youtube','reddit'].forEach(type => {
       const container = document.getElementById(`edit-${type}-tags`);
       if (!container) return;
       container.innerHTML = '';
@@ -1194,6 +1202,11 @@ const ColMenu = (() => {
     if (!val) return;
     if (type === 'web') val = val.replace(/^https?:\/\//i, '').replace(/^www\./, '').split(/[?#]/)[0].replace(/\/+$/, '');
     if (type === 'rss' && !/^https?:\/\//i.test(val)) val = 'https://' + val;
+    if (type === 'reddit') {
+      const s = val.replace(/^(https?:\/\/)?(www\.|old\.|new\.)?reddit\.com/i, '')
+        .replace(/^\/+/, '').replace(/^r\//i, '').split(/[/?#]/)[0].trim();
+      val = s ? 'r/' + s : '';
+    }
     // youtube: keep raw (@handle / channel URL / UC… id) — the Worker resolves it.
     if (!val || _editSources[type].includes(val)) { input.value = ''; return; }
     _editSources[type].push(val);

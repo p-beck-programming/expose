@@ -1,5 +1,10 @@
 /* ═══════════════════════════════════════════════
-   EXPOSÉ — gemini.service.js  (v3.1: feed-first pipeline + rate-limit resilience)
+   EXPOSÉ — gemini.service.js  (v3.2: feed-first pipeline + rate-limit resilience + Reddit)
+
+   v3.2 (pairs with Worker v7): reddit is a fourth source kind. Each listed
+   subreddit becomes a Worker ?type=reddit query scoped to the topic name
+   (subreddit-restricted search, sort=new, window matching RECENCY), so only
+   relevant posts enter the clustering pool.
 
    v3.1 (rate-limit hardening, pairs with Worker v6):
      - 7-day feed window (RECENCY '7d', was 3d/"72h")
@@ -158,6 +163,12 @@ const GeminiService = (() => {
       const c = String(ch).trim();
       if (c) plans.push({ label: c, kind: 'youtube', query: c,
                           url: `${PROXY}/?type=youtube&channel=${encodeURIComponent(c)}&limit=${PER_QUERY}` });
+    });
+    (rotated.reddit || []).forEach(sub => {
+      // Stored as "r/<sub>" — the Worker normalizes any loose form again anyway.
+      const s = String(sub).trim().replace(/^r\//i, '');
+      if (s) plans.push({ label: `r/${s}`, kind: 'reddit', query: `${topicName} in r/${s}`,
+                          url: `${PROXY}/?type=reddit&sub=${encodeURIComponent(s)}&q=${encodeURIComponent(topicName)}&when=${RECENCY}&limit=${PER_QUERY}` });
     });
     // Safety net only: a topic with no usable sources (and broad off) still gets
     // one query so it isn't dead. Broad topics never reach this — BROAD_SITES fill
@@ -331,9 +342,9 @@ Rules:
       url:         it.url || '',
       publishedAt: it.publishedAt || '',
     });
-    const buckets = { web: [], rss: [], youtube: [] };
+    const buckets = { web: [], rss: [], youtube: [], reddit: [] };
     for (const it of linkedItems.slice(0, MAX_SOURCES)) {
-      const key = it._kind === 'youtube' ? 'youtube' : it._kind === 'rss' ? 'rss' : 'web';
+      const key = ['youtube', 'rss', 'reddit'].includes(it._kind) ? it._kind : 'web';
       buckets[key].push(art(it));
     }
     return buckets;
@@ -448,7 +459,7 @@ Rules:
           summary:         String(st.summary || ''),
           score:           Number.isFinite(st.score) ? st.score : 50,
           sources,
-          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length,
+          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length + sources.reddit.length,
           broadSources:    [],
           groundingChunks: [], // grounding removed — kanban renders nothing for []
         };
@@ -469,7 +480,7 @@ Rules:
           subtopics' own sources, from the broad query, top 4. ── */
     if (topic.allSourcesEnabled) {
       const usedTitles = new Set(
-        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube]).map(a => a.title)
+        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube, ...(s.sources.reddit || [])]).map(a => a.title)
       );
       subtopics[0].broadSources = items
         .filter(it => !usedTitles.has(it.title))
@@ -511,7 +522,7 @@ Rules:
      Distributes MAX_SOURCES query slots across the user's
      web + rss + youtube sources, rotating the window each
      refresh so every source gets coverage over time.       */
-  const SOURCE_KINDS = ['web', 'rss', 'youtube'];
+  const SOURCE_KINDS = ['web', 'rss', 'youtube', 'reddit'];
 
   function _getRotatedSources(sources, offset) {
     const all = SOURCE_KINDS.flatMap(type =>
@@ -523,7 +534,7 @@ Rules:
       ? all
       : Array.from({ length: MAX_SOURCES }, (_, i) => all[(offset % total + i) % total]);
 
-    const out = { web: [], rss: [], youtube: [] };
+    const out = { web: [], rss: [], youtube: [], reddit: [] };
     pickWindow.forEach(s => out[s.type].push(s.value));
     return out;
   }

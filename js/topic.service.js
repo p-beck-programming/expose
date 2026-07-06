@@ -67,7 +67,7 @@ const TopicService = (() => {
     const topic = {
       id:               uid(),
       name:             data.name,
-      sources:          data.sources || { web: [], rss: [], youtube: [] },
+      sources:          data.sources || { web: [], rss: [], youtube: [], reddit: [] },
       strictMode:       !!data.strictMode,
       maxSubtopics:     clampSubs(data.maxSubtopics),
       allSourcesEnabled:!!data.allSourcesEnabled,
@@ -142,7 +142,7 @@ const TopicService = (() => {
         summary:     s.summary,
         score:       s.score,
         sourceCount: s.sourceCount,
-        sources:     s.sources || { web: [], rss: [], youtube: [] },
+        sources:     s.sources || { web: [], rss: [], youtube: [], reddit: [] },
         broadSources:s.broadSources || [],
         viewed:      prev.viewed || false,
         pinned:      prev.pinned || false,

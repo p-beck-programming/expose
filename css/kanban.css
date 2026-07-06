@@ -148,6 +148,8 @@
 .source-bubble.web-bubble { color:var(--dim); }
 .source-bubble.rss-bubble { color:#E0A66A; }
 .source-bubble.youtube-bubble { color:#D9777A; }
+.source-bubble.reddit-bubble { color:#E8703A; }
+.source-bubble.reddit-bubble svg { fill:none; stroke:currentColor; }
 .card-right { display:flex; align-items:center; gap:9px; }
 .card-source-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); }
 

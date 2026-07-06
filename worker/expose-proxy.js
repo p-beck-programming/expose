@@ -1,5 +1,5 @@
 /**
- * Exposé proxy — Worker v6 (rate-limit resilience: 429 backoff + stale fallback + 7-day window)
+ * Exposé proxy — Worker v7 (Reddit sources: per-subreddit topic search via .rss)
  * Paste over the existing Worker code in the Cloudflare editor and Deploy.
  *
  * Endpoints (unchanged shape — gemini.service.js consumes the same item shape):
@@ -7,9 +7,22 @@
  *   ?type=rss     → fetch + parse ANY user-supplied RSS 2.0 or Atom feed
  *   ?type=youtube → resolve a channel (UC id / @handle / channel URL) to its Atom
  *                   feed (youtube.com/feeds/videos.xml?channel_id=…) and parse it
+ *   ?type=reddit  → subreddit posts matching a topic. &sub= accepts "worldnews",
+ *                   "r/worldnews", or a full subreddit URL. With &q= it hits
+ *                   reddit.com/r/<sub>/search.rss?q=…&restrict_sr=on&sort=new
+ *                   (topic-relevant posts only); without q, the sub's plain .rss.
+ *                   Link posts resolve to the OUTBOUND article URL; self posts
+ *                   keep the reddit permalink. The "submitted by /u/…" boilerplate
+ *                   is stripped from snippets so it never reaches clustering.
  * All feed types share one parser (parseFeed) for RSS <item> and Atom <entry>.
  *
- * WHY v6: users hitting "news providers are limiting rates" saw most sources fail
+ * WHY v7: Reddit was dropped in v4 because its unauthenticated JSON API 403-blocks
+ * datacenter IPs — but its .rss endpoints serve Cloudflare egress fine (verified),
+ * and per-sub search.rss gives topic relevance for free. Rate-limit protections
+ * from v6 (success cache, stale fallback, spaced 429 retry) all apply to Reddit
+ * requests automatically since they run through the same fetch path.
+ *
+ * v6: users hitting "news providers are limiting rates" saw most sources fail
  * with no recourse — retrying immediately just re-triggered the same 429s. v6:
  *
  *   • 429 IS now retried — exactly once, after a 1.5–2.2s pause (the rate window is
@@ -68,6 +81,7 @@ export default {
       if (type === "news") res = await handleNews(url);
       else if (type === "rss") res = await handleRss(url);
       else if (type === "youtube") res = await handleYouTube(url);
+      else if (type === "reddit") res = await handleReddit(url);
       else res = json({ ok: false, type, error: "unknown_type" }, 400);
     } catch (err) {
       res = json({ ok: false, type, error: "proxy_failure", detail: String(err) }, 502);
@@ -325,6 +339,83 @@ async function handleRss(url) {
   }));
 
   return json({ ok: true, type: "rss", query: feedUrl, fetchedAt: new Date().toISOString(), items });
+}
+
+/* ================= reddit: per-subreddit topic search ================= */
+
+async function handleReddit(url) {
+  const rawSub = (url.searchParams.get("sub") || "").trim();
+  if (!rawSub) return json({ ok: false, type: "reddit", error: "missing_sub" }, 400);
+  const sub = normalizeSubreddit(rawSub);
+  if (!sub) return json({ ok: false, type: "reddit", error: "bad_sub", detail: rawSub }, 400);
+
+  const q     = (url.searchParams.get("q") || "").trim();
+  const when  = (url.searchParams.get("when") || "").trim();
+  const limit = clampInt(url.searchParams.get("limit"), 10, 1, 30);
+
+  // Map the app's rolling window (e.g. 7d, 24h) onto Reddit's t buckets.
+  const days = /^(\d+)h$/.test(when) ? parseInt(when, 10) / 24
+             : /^(\d+)d$/.test(when) ? parseInt(when, 10) : 7;
+  const t = days <= 1 ? "day" : days <= 7 ? "week" : "month";
+
+  // With a topic query, use subreddit-restricted search — only relevant posts.
+  // Without one, fall back to the sub's plain feed (hot posts).
+  const feedUrl = q
+    ? `https://www.reddit.com/r/${sub}/search.rss?q=${encodeURIComponent(q)}&restrict_sr=on&sort=new&t=${t}`
+    : `https://www.reddit.com/r/${sub}/.rss`;
+
+  let res;
+  try {
+    res = await fetchWithRetry(feedUrl, { headers: BROWSER_HEADERS });
+  } catch (err) {
+    return json({ ok: false, type: "reddit", query: feedUrl, error: "feed_unreachable", detail: String(err) });
+  }
+  if (!res.ok) {
+    // 403/404 usually means a private, banned, or nonexistent subreddit.
+    return json({ ok: false, type: "reddit", query: feedUrl, error: "feed_error", detail: `HTTP ${res.status}` });
+  }
+
+  const xml = await res.text();
+  if (!/<feed[\s>]/i.test(xml)) {
+    return json({ ok: false, type: "reddit", query: feedUrl, error: "not_a_feed", detail: xml.slice(0, 120) });
+  }
+
+  const items = parseFeed(xml).slice(0, limit).map((raw) => {
+    // Reddit's entry content ends with: <a href="…">[link]</a> <a href="…">[comments]</a>
+    // For link posts, [link] is the submitted article URL; for self posts it's the
+    // permalink. Prefer the outbound article; keep the reddit thread otherwise.
+    const linkMatch = (raw.description || "").match(/<a href="([^"]+)">\s*\[link\]/i);
+    const outbound  = linkMatch ? linkMatch[1] : "";
+    const outHost   = outbound ? hostOf(outbound) : "";
+    const external  = outHost && outHost !== "reddit.com" && !outHost.endsWith(".reddit.com") ? outbound : "";
+
+    // Self-post body (if any) minus the "submitted by /u/… [link] [comments]" boilerplate.
+    const snippet = stripTags(raw.description || "").split(/submitted by/i)[0].trim().slice(0, 300);
+
+    return {
+      id: hashId(raw.link || raw.title),
+      title: raw.title,
+      url: external || raw.link,
+      urlResolved: true,
+      source: `r/${sub}`,
+      sourceDomain: external ? outHost : "reddit.com",
+      publishedAt: toIso(raw.pubDate),
+      snippet,
+    };
+  });
+
+  return json({ ok: true, type: "reddit", query: q || feedUrl, subreddit: sub, fetchedAt: new Date().toISOString(), items });
+}
+
+// "worldnews" | "r/worldnews" | "/r/worldnews/" | reddit.com URL (with or
+// without protocol) → bare sub name.
+function normalizeSubreddit(input) {
+  const s = String(input).trim()
+    .replace(/^(https?:\/\/)?(www\.|old\.|new\.)?reddit\.com/i, "")
+    .replace(/^\/+/, "")
+    .replace(/^r\//i, "")
+    .split(/[/?#]/)[0].trim();
+  return /^[A-Za-z0-9][A-Za-z0-9_]{1,20}$/.test(s) ? s : "";
 }
 
 /* ================= youtube: per-channel Atom feed ================= */
