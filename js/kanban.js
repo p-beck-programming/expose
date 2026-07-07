@@ -57,8 +57,17 @@ const Kanban = (() => {
     });
   }
 
-  /* ── Wheel: hovering anywhere over a column scrolls that column's body;
-        over empty board space the wheel pans the board horizontally. ── */
+  /* ── Wheel: the scroll wheel must always move SOMETHING. Hovering a column
+        scrolls its body when it has room in that direction; otherwise the
+        wheel pans the whole board horizontally; otherwise fall through to
+        native scrolling. (The old version preventDefault()ed even when the
+        hovered column had nothing to scroll — a dead wheel.) ── */
+  function _canScrollY(el, dy) {
+    if (!el || el.scrollHeight <= el.clientHeight + 1) return false;
+    return dy > 0
+      ? el.scrollTop + el.clientHeight < el.scrollHeight - 1
+      : el.scrollTop > 0;
+  }
   function attachWheelHandler() {
     const area = document.getElementById('kanban-area');
     if (!area) return;
@@ -67,9 +76,14 @@ const Kanban = (() => {
       if (window.matchMedia('(max-width: 768px)').matches) return; // mobile: native vertical scroll
       const colBody = e.target.closest('.col-body')
                    || e.target.closest('.kanban-col')?.querySelector('.col-body');
-      e.preventDefault();
-      if (colBody) colBody.scrollTop += e.deltaY;
-      else area.scrollLeft += e.deltaY;
+      if (_canScrollY(colBody, e.deltaY)) {
+        e.preventDefault();
+        colBody.scrollTop += e.deltaY;
+      } else if (area.scrollWidth > area.clientWidth + 1) {
+        e.preventDefault();
+        area.scrollLeft += e.deltaY;
+      }
+      // Neither can move → don't preventDefault; let the browser scroll natively.
     }, { passive: false });
   }
 

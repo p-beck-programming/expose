@@ -99,9 +99,12 @@ button { font-family:inherit; }
 ::-webkit-scrollbar-thumb { background:var(--line); border-radius:5px; border:2px solid var(--void); }
 ::-webkit-scrollbar-thumb:hover { background:var(--faint); }
 
-/* ═══════════ App shell ═══════════ */
-.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; height:100vh; }
-.main { display:flex; flex-direction:column; min-width:0; }
+/* ═══════════ App shell ═══════════
+   grid-template-rows:100% + min-height:0 on .main are load-bearing:
+   without them the implicit grid row auto-sizes to content, .main grows
+   past 100vh, and column bodies never overflow — so they never scroll. */
+.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:100%; height:100vh; overflow:hidden; }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; }
 .content { flex:1; min-height:0; padding:14px 16px 16px; display:flex; }
 
 /* ═══════════ Sidebar ═══════════ */

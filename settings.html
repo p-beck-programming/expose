@@ -135,6 +135,22 @@ html, body { height: 100%; overflow: hidden; }
             <button class="btn btn-ghost btn-sm" onclick="toggleApiKeyEdit()">Cancel</button>
           </div>
         </div>
+        <div class="section-card-body" style="border-top:1px solid var(--border-soft)">
+          <div class="section-card-row" style="border-bottom:none;padding-left:0;padding-right:0">
+            <div>
+              <div class="row-label">Model</div>
+              <div class="row-hint">All options fit the free tier. Flash = smartest, Flash-Lite = faster with a bigger daily quota, Gemma = open models with the most generous limits.</div>
+            </div>
+            <select class="select" id="model-select" style="width:230px" onchange="saveSetting('geminiModel', this.value)">
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (default)</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite</option>
+              <option value="gemma-3-27b-it">Gemma 3 27B (open model)</option>
+              <option value="gemma-3-12b-it">Gemma 3 12B (open model)</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <!-- ── REFRESH SCHEDULE ── -->
@@ -326,6 +342,13 @@ function init() {
   const rateSelect = document.getElementById('refresh-rate');
   if (rateSelect) {
     rateSelect.value = String(settings.refreshRate || 60);
+  }
+
+  // Gemini model
+  const modelSelect = document.getElementById('model-select');
+  if (modelSelect) {
+    modelSelect.value = settings.geminiModel || 'gemini-2.5-flash-lite';
+    if (modelSelect.selectedIndex === -1) modelSelect.value = 'gemini-2.5-flash-lite'; // stale saved id
   }
 
   // Theme select — lists the real palettes (the old Light/Dark values weren't

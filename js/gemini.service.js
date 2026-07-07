@@ -44,9 +44,10 @@
 
    DEPLOYMENT NOTES:
    1. WORKER: PROXY below must match your deployed Worker URL.
-   2. MODEL: gemini-2.5-flash-lite, text-only. No grounded-request
-      quota consumed at all now; token use per refresh is small
-      (one call, ~1200 max output tokens, no URLs in output).
+   2. MODEL: user-selectable in Settings → Intelligence (localStorage
+      geminiModel, default gemini-2.5-flash-lite). Free-tier Gemini
+      flash/flash-lite/Gemma models; request config adapts per family
+      (see _callGemini). One text-only call, ~1200 max output tokens.
    3. API KEY: unchanged — localStorage expose_settings_v1.
    4. MIGRATION: _fetchItems() moves server-side as-is later;
       _callGemini() swaps to a proxy endpoint. Contract stable.
@@ -55,8 +56,7 @@
 const GeminiService = (() => {
 
   const PROXY         = 'https://expose-proxy.pbeckman731.workers.dev';
-  const MODEL         = 'gemini-2.5-flash-lite';
-  const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+  const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
   const MAX_SOURCES   = 6;    // hard cap on total sources per subtopic
   const MAX_SUBTOPICS = 3;    // default subtopic count per refresh (per-topic override 2–6)
   const MIN_SUBTOPICS = 2;    // floor for the per-topic subtopic cap
@@ -96,6 +96,14 @@ const GeminiService = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       return s.geminiApiKey || '';
     } catch { return ''; }
+  }
+
+  /* ── Get model (Settings → Intelligence → Model) ── */
+  function getModel() {
+    try {
+      const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+      return s.geminiModel || DEFAULT_MODEL;
+    } catch { return DEFAULT_MODEL; }
   }
 
   /* ════════════════════════════════════════════
@@ -258,19 +266,28 @@ const GeminiService = (() => {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('NO_API_KEY');
 
+    // Per-model capability differences on the free tier:
+    //   gemini-2.5-*  → thinkingConfig supported; budget 0 disables thinking (speed)
+    //   gemini-2.0-*  → no thinkingConfig (400s if sent)
+    //   gemma-*       → no thinkingConfig AND no responseMimeType JSON mode;
+    //                   the prompt demands raw JSON and _extractJSON strips fences.
+    const model    = getModel();
+    const isGemma  = /^gemma/i.test(model);
+    const generationConfig = {
+      temperature:     0.2,  // low temp = stable JSON
+      maxOutputTokens: 1200, // small: no URLs in the output
+    };
+    if (!isGemma) generationConfig.responseMimeType = 'application/json';
+    if (/^gemini-2\.5/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature:      0.2,  // no grounding requirement anymore — low temp = stable JSON
-        maxOutputTokens:  1200, // small now: no URLs in the output (was 2600)
-        thinkingConfig:   { thinkingBudget: 0 },
-        responseMimeType: 'application/json',
-      },
+      generationConfig,
       // NOTE: no `tools` — grounding removed on purpose. The model
       // must never search; it only organizes what we fetched.
     };
 
-    const res = await fetch(`${API_URL}?key=${apiKey}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
@@ -280,6 +297,7 @@ const GeminiService = (() => {
       const err = await res.json().catch(() => ({}));
       const msg = err?.error?.message || `HTTP ${res.status}`;
       if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
+      if (res.status === 404) throw new Error('MODEL_NOT_FOUND');
       if (res.status === 400) throw new Error(`BAD_REQUEST: ${msg}`);
       if (res.status === 403) throw new Error('INVALID_API_KEY');
       throw new Error(msg);
@@ -543,7 +561,8 @@ Rules:
   function _friendlyError(code) {
     const map = {
       NO_API_KEY:     'Add your Gemini API key in Settings → Intelligence.',
-      QUOTA_EXCEEDED: 'Daily quota reached. Check usage at aistudio.google.com.',
+      QUOTA_EXCEEDED: 'Daily quota reached for this model. Try a different model in Settings → Intelligence, or check usage at aistudio.google.com.',
+      MODEL_NOT_FOUND:'The selected model is unavailable on your API key. Pick another in Settings → Intelligence.',
       INVALID_API_KEY:'API key rejected. Check Settings → Intelligence.',
       EMPTY_RESPONSE: 'Gemini returned no results — try again.',
       PARSE_ERROR:    'Could not parse response. Try refreshing.',
@@ -553,7 +572,7 @@ Rules:
     return map[code] || `Gemini error: ${code}`;
   }
 
-  return { fetchSubtopics, getApiKey };
+  return { fetchSubtopics, getApiKey, getModel };
 })();
 
 window.GeminiService = GeminiService;
