@@ -20,7 +20,7 @@ try {
 <link rel="stylesheet" href="css/landing.css"/>
 <style>body { overflow: auto; }</style>
 </head>
-<body class="dot-bg">
+<body>
 
 <!-- ── Top nav ── -->
 <nav class="topnav">
@@ -166,10 +166,12 @@ try {
 
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/worldmap.js"></script>
 <script>
   Theme.init();
   // Redirect logged-in users straight to dashboard
   if (AuthService.isAuthenticated()) window.location.replace('dashboard.html');
+  WorldMap.mount();
 </script>
 </body>
 </html>

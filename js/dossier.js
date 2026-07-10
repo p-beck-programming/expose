@@ -70,15 +70,16 @@ const Dossier = (() => {
       </div>`;
   }
 
+  // The column only exists while articles are filed: appears on the first
+  // filing, updates in place, and disappears when the last article is removed.
   function refresh() {
     const existing = $('dossier-col');
-    if (ArticleService.count() > 0) {
-      const newCol = buildColumn();
-      if (existing) existing.replaceWith(newCol);
-      else document.getElementById('kanban-area')?.appendChild(newCol);
-    } else if (existing) {
-      existing.remove();
+    if (ArticleService.count() === 0) {
+      existing?.remove();
+      return;
     }
+    if (existing) existing.replaceWith(buildColumn());
+    else $('kanban-area')?.appendChild(buildColumn());
   }
 
   function removeArticle(id) {

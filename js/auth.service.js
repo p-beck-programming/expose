@@ -83,7 +83,9 @@ const AuthService = (() => {
 
     const user = { id: record.id, email: record.email, createdAt: record.createdAt, settings: record.settings };
     localStorage.setItem(SESSION_KEY,  JSON.stringify(user));
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(user.settings || defaultSettings()));
+    // Merge over any settings already on this device (e.g. the saved palette) —
+    // a plain overwrite here was resetting the theme on every login.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...getSettings(), ...(user.settings || defaultSettings()) }));
     return { success: true, user };
   }
 
@@ -127,7 +129,10 @@ const AuthService = (() => {
     const rec   = users[user.email];
     if (!rec) return { success: false };
 
-    const merged = { ...(rec.settings || defaultSettings()), ...data };
+    // Merge order matters: account record, then this device's current settings
+    // (Theme.set writes `palette` straight to SETTINGS_KEY — without this layer,
+    // saving any other setting silently wiped the chosen theme), then the patch.
+    const merged = { ...defaultSettings(), ...(rec.settings || {}), ...getSettings(), ...data };
     rec.settings = merged;
     saveUsers(users);
 

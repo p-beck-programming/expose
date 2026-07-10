@@ -29,8 +29,8 @@ const Overlay = (() => {
   let currentStep = 1;
   const totalSteps = 2;
 
-  // Sources per type: { web: [], rss: [], youtube: [] }
-  let sources = { web: [], rss: [], youtube: [] };
+  // Sources per type: { web: [], rss: [], youtube: [], reddit: [] }
+  let sources = { web: [], rss: [], youtube: [], reddit: [] };
   let allSourcesEnabled = false;
   let strictMode = false;       // only return items from the listed web sites
   let maxSubtopics = 3;         // per-topic subtopic cap (2–6)
@@ -68,13 +68,13 @@ const Overlay = (() => {
   /* ── Reset ── */
   function reset() {
     currentStep = 1;
-    sources = { web: [], rss: [], youtube: [] };
+    sources = { web: [], rss: [], youtube: [], reddit: [] };
     allSourcesEnabled = false;
 
     // Clear inputs
     const nameInput = $('topic-name-input');
     if (nameInput) { nameInput.value = ''; nameInput.classList.remove('error'); }
-    ['web-input', 'rss-input', 'youtube-input'].forEach(id => {
+    ['web-input', 'rss-input', 'youtube-input', 'reddit-input'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
     // Reset toggles + stepper
@@ -157,7 +157,7 @@ const Overlay = (() => {
     const btn = $('overlay-next-btn');
 
     // Require at least one source or all-sources enabled
-    const totalSources = sources.web.length + sources.rss.length + sources.youtube.length;
+    const totalSources = sources.web.length + sources.rss.length + sources.youtube.length + sources.reddit.length;
     const hint = $('no-sources-hint');
     if (totalSources === 0 && !allSourcesEnabled) {
       if (hint) { hint.style.display = 'flex'; }
@@ -212,6 +212,15 @@ const Overlay = (() => {
       if (!raw) return;
       value = raw;
       if ($('youtube-input')) $('youtube-input').value = '';
+    } else if (type === 'reddit') {
+      // Accept "worldnews", "r/worldnews", or a subreddit URL (protocol optional) → store "r/<sub>".
+      const raw = $('reddit-input')?.value?.trim()
+        .replace(/^(https?:\/\/)?(www\.|old\.|new\.)?reddit\.com/i, '')
+        .replace(/^\/+/, '').replace(/^r\//i, '')
+        .split(/[/?#]/)[0].trim();
+      if (!raw) return;
+      value = 'r/' + raw;
+      if ($('reddit-input')) $('reddit-input').value = '';
     }
     if (!value) return;
     if (sources[type].includes(value)) return; // no duplicates
@@ -250,7 +259,7 @@ const Overlay = (() => {
   }
 
   function updateSourceCounts() {
-    const counts = { web: sources.web.length, rss: sources.rss.length, youtube: sources.youtube.length };
+    const counts = { web: sources.web.length, rss: sources.rss.length, youtube: sources.youtube.length, reddit: sources.reddit.length };
     Object.entries(counts).forEach(([type, count]) => {
       const el = $(`${type}-count`);
       if (el) el.textContent = count > 0 ? count : '';

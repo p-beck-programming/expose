@@ -1,5 +1,16 @@
 /* ═══════════════════════════════════════════════
-   EXPOSÉ — gemini.service.js  (v3: feed-first pipeline)
+   EXPOSÉ — gemini.service.js  (v3.2: feed-first pipeline + rate-limit resilience + Reddit)
+
+   v3.2 (pairs with Worker v7): reddit is a fourth source kind. Each listed
+   subreddit becomes a Worker ?type=reddit query scoped to the topic name
+   (subreddit-restricted search, sort=new, window matching RECENCY), so only
+   relevant posts enter the clustering pool.
+
+   v3.1 (rate-limit hardening, pairs with Worker v6):
+     - 7-day feed window (RECENCY '7d', was 3d/"72h")
+     - plan launches staggered 300ms apart (parallel bursts trip Google's limiter)
+     - one client-side retry round for failed sources after 1.8s
+     - NO_RESULTS errors now name each failing source + status inline
 
    ARCHITECTURE CHANGE FROM v2:
    v2 asked Gemini (with Google Search grounding) to both FIND
@@ -33,9 +44,10 @@
 
    DEPLOYMENT NOTES:
    1. WORKER: PROXY below must match your deployed Worker URL.
-   2. MODEL: gemini-2.5-flash-lite, text-only. No grounded-request
-      quota consumed at all now; token use per refresh is small
-      (one call, ~1200 max output tokens, no URLs in output).
+   2. MODEL: user-selectable in Settings → Intelligence (localStorage
+      geminiModel, default gemini-2.5-flash-lite). Free-tier Gemini
+      flash/flash-lite/Gemma models; request config adapts per family
+      (see _callGemini). One text-only call, ~1200 max output tokens.
    3. API KEY: unchanged — localStorage expose_settings_v1.
    4. MIGRATION: _fetchItems() moves server-side as-is later;
       _callGemini() swaps to a proxy endpoint. Contract stable.
@@ -44,15 +56,17 @@
 const GeminiService = (() => {
 
   const PROXY         = 'https://expose-proxy.pbeckman731.workers.dev';
-  const MODEL         = 'gemini-2.5-flash-lite';
-  const API_URL       = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+  const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
   const MAX_SOURCES   = 6;    // hard cap on total sources per subtopic
   const MAX_SUBTOPICS = 3;    // default subtopic count per refresh (per-topic override 2–6)
   const MIN_SUBTOPICS = 2;    // floor for the per-topic subtopic cap
   const MAX_SUBTOPICS_CAP = 6;// ceiling for the per-topic subtopic cap
   const CACHE_MINUTES = 30;   // skip fetch if data is fresher than this
-  const RECENCY       = '3d'; // feed window — matches v2's "last 72h"
+  const RECENCY       = '7d'; // feed window — one week (was 3d/72h; too tight for slow-burn topics)
   const PER_QUERY     = 8;    // items requested per source query
+  const FETCH_STAGGER = 300;  // ms between plan launches — a parallel burst of 6 Google News
+                              // queries from one IP is exactly what trips their rate limiter
+  const RETRY_DELAY   = 1800; // ms before the one client-side retry of failed plans
   const BROAD_LIMIT   = 20;   // legacy: deep pool for the broad-merge fallback (plans.length===0)
   const MAX_ITEMS     = 30;   // total item pool sent to clustering
 
@@ -82,6 +96,14 @@ const GeminiService = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       return s.geminiApiKey || '';
     } catch { return ''; }
+  }
+
+  /* ── Get model (Settings → Intelligence → Model) ── */
+  function getModel() {
+    try {
+      const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
+      return s.geminiModel || DEFAULT_MODEL;
+    } catch { return DEFAULT_MODEL; }
   }
 
   /* ════════════════════════════════════════════
@@ -150,6 +172,12 @@ const GeminiService = (() => {
       if (c) plans.push({ label: c, kind: 'youtube', query: c,
                           url: `${PROXY}/?type=youtube&channel=${encodeURIComponent(c)}&limit=${PER_QUERY}` });
     });
+    (rotated.reddit || []).forEach(sub => {
+      // Stored as "r/<sub>" — the Worker normalizes any loose form again anyway.
+      const s = String(sub).trim().replace(/^r\//i, '');
+      if (s) plans.push({ label: `r/${s}`, kind: 'reddit', query: `${topicName} in r/${s}`,
+                          url: `${PROXY}/?type=reddit&sub=${encodeURIComponent(s)}&q=${encodeURIComponent(topicName)}&when=${RECENCY}&limit=${PER_QUERY}` });
+    });
     // Safety net only: a topic with no usable sources (and broad off) still gets
     // one query so it isn't dead. Broad topics never reach this — BROAD_SITES fill
     // the plan list. Uses the legacy merge fallback (hardened in worker v5).
@@ -160,12 +188,35 @@ const GeminiService = (() => {
     return plans;
   }
 
+  const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Launch plans with a small stagger instead of one parallel burst — Google News
+  // rate-limits per-IP, and 6 simultaneous queries is the classic trigger.
+  function _launchPlans(plans) {
+    return Promise.allSettled(
+      plans.map((p, i) => _sleep(i * FETCH_STAGGER).then(() => fetch(p.url)).then(r => r.json()))
+    );
+  }
+
   async function _fetchItems(topicName, rotated) {
     const plans = _buildPlans(topicName, rotated);
 
-    const results = await Promise.allSettled(
-      plans.map(p => fetch(p.url).then(r => r.json()))
-    );
+    const results = await _launchPlans(plans);
+    const bodies  = plans.map((_, i) => results[i].status === 'fulfilled' ? results[i].value : null);
+
+    // ONE retry round for whatever failed, after a pause — by then the upstream
+    // rate window has usually rolled over, and the Worker's stale cache can also
+    // answer. This is what makes "spam the retry button" unnecessary.
+    const failedIdx = plans.map((_, i) => i).filter(i => !(bodies[i] && bodies[i].ok));
+    if (failedIdx.length > 0) {
+      await _sleep(RETRY_DELAY);
+      const retryResults = await _launchPlans(failedIdx.map(i => plans[i]));
+      failedIdx.forEach((planIdx, j) => {
+        const rb = retryResults[j].status === 'fulfilled' ? retryResults[j].value : null;
+        if (rb && rb.ok) bodies[planIdx] = rb;
+        else if (rb && !bodies[planIdx]) bodies[planIdx] = rb; // keep the more descriptive error
+      });
+    }
 
     const sourceReport = [];
     const queriesUsed  = [];
@@ -173,11 +224,12 @@ const GeminiService = (() => {
 
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
-      const body = results[i].status === 'fulfilled' ? results[i].value : null;
+      const body = bodies[i];
       queriesUsed.push(plan.query);
 
       if (body && body.ok) {
-        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length, backend: body.backend || '' });
+        sourceReport.push({ source: plan.label, status: 'ok', count: body.items.length,
+                            backend: body.backend || '', stale: !!body.stale });
         // Tag each item with the plan kind so bucketing is reliable downstream.
         body.items.forEach(it => { it._kind = plan.kind; });
         all = all.concat(body.items);
@@ -214,19 +266,28 @@ const GeminiService = (() => {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('NO_API_KEY');
 
+    // Per-model capability differences on the free tier:
+    //   gemini-2.5-*  → thinkingConfig supported; budget 0 disables thinking (speed)
+    //   gemini-2.0-*  → no thinkingConfig (400s if sent)
+    //   gemma-*       → no thinkingConfig AND no responseMimeType JSON mode;
+    //                   the prompt demands raw JSON and _extractJSON strips fences.
+    const model    = getModel();
+    const isGemma  = /^gemma/i.test(model);
+    const generationConfig = {
+      temperature:     0.2,  // low temp = stable JSON
+      maxOutputTokens: 1200, // small: no URLs in the output
+    };
+    if (!isGemma) generationConfig.responseMimeType = 'application/json';
+    if (/^gemini-2\.5/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature:      0.2,  // no grounding requirement anymore — low temp = stable JSON
-        maxOutputTokens:  1200, // small now: no URLs in the output (was 2600)
-        thinkingConfig:   { thinkingBudget: 0 },
-        responseMimeType: 'application/json',
-      },
+      generationConfig,
       // NOTE: no `tools` — grounding removed on purpose. The model
       // must never search; it only organizes what we fetched.
     };
 
-    const res = await fetch(`${API_URL}?key=${apiKey}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
@@ -236,6 +297,7 @@ const GeminiService = (() => {
       const err = await res.json().catch(() => ({}));
       const msg = err?.error?.message || `HTTP ${res.status}`;
       if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
+      if (res.status === 404) throw new Error('MODEL_NOT_FOUND');
       if (res.status === 400) throw new Error(`BAD_REQUEST: ${msg}`);
       if (res.status === 403) throw new Error('INVALID_API_KEY');
       throw new Error(msg);
@@ -298,9 +360,9 @@ Rules:
       url:         it.url || '',
       publishedAt: it.publishedAt || '',
     });
-    const buckets = { web: [], rss: [], youtube: [] };
+    const buckets = { web: [], rss: [], youtube: [], reddit: [] };
     for (const it of linkedItems.slice(0, MAX_SOURCES)) {
-      const key = it._kind === 'youtube' ? 'youtube' : it._kind === 'rss' ? 'rss' : 'web';
+      const key = ['youtube', 'rss', 'reddit'].includes(it._kind) ? it._kind : 'web';
       buckets[key].push(art(it));
     }
     return buckets;
@@ -348,21 +410,21 @@ Rules:
     const cap = _clampSubs(topic.maxSubtopics);
 
     if (items.length === 0) {
-      // per-source failure detail surfaced for diagnosability (console only)
+      // Per-source failure detail — surfaced to the user now, not just the console.
       const failed = sourceReport.filter(r => r.count === 0);
       const dead = failed
         .map(r => `${r.source} (${r.status}${r.detail ? `: ${r.detail}` : ''})`).join(', ');
       console.debug('[Exposé] no items — failures:', dead || 'no sources configured');
-      // If every failure is a transient upstream rate-limit/outage, say so softly
-      // rather than dumping raw HTTP codes — a blip shouldn't read as a hard error.
       const allTransient = failed.length > 0 && failed.every(r =>
         r.status === 'upstream_error' || /\b(429|502|503|504)\b/.test(r.detail || ''));
       return {
         success: false,
         error:   'NO_RESULTS',
+        sourceReport,
         message: allTransient
-          ? 'News providers are briefly rate-limiting — Exposé will retry on the next refresh.'
-          : `No items found in the last 72h. Per source: ${dead || 'no sources configured'}.`,
+          ? `News providers are rate-limiting (${failed.length}/${sourceReport.length} sources failed: ${dead}). ` +
+            `Exposé already retried each source once and checked its cache — wait ~2 minutes before retrying, or add RSS feeds (they are never rate-limited).`
+          : `No items found in the last 7 days. Per source: ${dead || 'no sources configured'}.`,
       };
     }
 
@@ -377,7 +439,7 @@ Rules:
         return {
           success: false,
           error:   'NO_RESULTS',
-          message: `No items from your listed sites in the last 72h (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
+          message: `No items from your listed sites in the last 7 days (strict mode). Add more sites, widen the sites you watch, or turn off strict mode.`,
         };
       }
     }
@@ -415,7 +477,7 @@ Rules:
           summary:         String(st.summary || ''),
           score:           Number.isFinite(st.score) ? st.score : 50,
           sources,
-          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length,
+          sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length + sources.reddit.length,
           broadSources:    [],
           groundingChunks: [], // grounding removed — kanban renders nothing for []
         };
@@ -436,7 +498,7 @@ Rules:
           subtopics' own sources, from the broad query, top 4. ── */
     if (topic.allSourcesEnabled) {
       const usedTitles = new Set(
-        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube]).map(a => a.title)
+        subtopics.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube, ...(s.sources.reddit || [])]).map(a => a.title)
       );
       subtopics[0].broadSources = items
         .filter(it => !usedTitles.has(it.title))
@@ -478,7 +540,7 @@ Rules:
      Distributes MAX_SOURCES query slots across the user's
      web + rss + youtube sources, rotating the window each
      refresh so every source gets coverage over time.       */
-  const SOURCE_KINDS = ['web', 'rss', 'youtube'];
+  const SOURCE_KINDS = ['web', 'rss', 'youtube', 'reddit'];
 
   function _getRotatedSources(sources, offset) {
     const all = SOURCE_KINDS.flatMap(type =>
@@ -490,7 +552,7 @@ Rules:
       ? all
       : Array.from({ length: MAX_SOURCES }, (_, i) => all[(offset % total + i) % total]);
 
-    const out = { web: [], rss: [], youtube: [] };
+    const out = { web: [], rss: [], youtube: [], reddit: [] };
     pickWindow.forEach(s => out[s.type].push(s.value));
     return out;
   }
@@ -499,7 +561,8 @@ Rules:
   function _friendlyError(code) {
     const map = {
       NO_API_KEY:     'Add your Gemini API key in Settings → Intelligence.',
-      QUOTA_EXCEEDED: 'Daily quota reached. Check usage at aistudio.google.com.',
+      QUOTA_EXCEEDED: 'Daily quota reached for this model. Try a different model in Settings → Intelligence, or check usage at aistudio.google.com.',
+      MODEL_NOT_FOUND:'The selected model is unavailable on your API key. Pick another in Settings → Intelligence.',
       INVALID_API_KEY:'API key rejected. Check Settings → Intelligence.',
       EMPTY_RESPONSE: 'Gemini returned no results — try again.',
       PARSE_ERROR:    'Could not parse response. Try refreshing.',
@@ -509,7 +572,7 @@ Rules:
     return map[code] || `Gemini error: ${code}`;
   }
 
-  return { fetchSubtopics, getApiKey };
+  return { fetchSubtopics, getApiKey, getModel };
 })();
 
 window.GeminiService = GeminiService;

@@ -148,6 +148,8 @@
 .source-bubble.web-bubble { color:var(--dim); }
 .source-bubble.rss-bubble { color:#E0A66A; }
 .source-bubble.youtube-bubble { color:#D9777A; }
+.source-bubble.reddit-bubble { color:#E8703A; }
+.source-bubble.reddit-bubble svg { fill:none; stroke:currentColor; }
 .card-right { display:flex; align-items:center; gap:9px; }
 .card-source-count { font-family:var(--font-mono); font-size:10px; color:var(--faint); }
 
@@ -461,11 +463,22 @@
   color:var(--trace); border:1px solid var(--trace); border-radius:2px; padding:1px 5px;
 }
 
-/* ═══════════ Mobile (≤768px): one column at a time, swipeable ═══════════ */
+/* ═══════════ Mobile: columns stack vertically ═══════════
+   ≤768px the board becomes a single vertical feed — the page (kanban-area)
+   scrolls vertically and each column keeps a capped internal scroll. */
 @media (max-width: 768px) {
-  .kanban-area { scroll-snap-type:x mandatory; gap:10px; }
-  .kanban-col, .kanban-col.pinned-col {
-    width:86vw; min-width:86vw; max-width:86vw;
-    scroll-snap-align:start;
+  .kanban-area {
+    flex-direction:column; align-items:stretch;
+    overflow-x:hidden; overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
   }
+  .kanban-col,
+  .kanban-col.pinned-col {
+    width:100%; min-width:0; max-width:none;
+    flex-shrink:0; max-height:none;
+  }
+  .col-body { max-height:55vh; }
+  .col-dropdown { max-width:calc(100vw - 24px); }
+  .fullscreen-body { padding:18px 14px calc(80px + env(safe-area-inset-bottom)); }
+  .confirm-modal, .edit-sources-modal { width:calc(100vw - 24px); }
 }

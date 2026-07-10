@@ -56,15 +56,46 @@ const Kanban = (() => {
     });
   }
 
+  /* ── Wheel: the scroll wheel must always move SOMETHING. Hovering a column
+        scrolls its body when it has room in that direction; otherwise the
+        wheel pans the whole board horizontally; otherwise fall through to
+        native scrolling. (The old version preventDefault()ed even when the
+        hovered column had nothing to scroll — a dead wheel.) ── */
+  function _canScrollY(el, dy) {
+    if (!el || el.scrollHeight <= el.clientHeight + 1) return false;
+    return dy > 0
+      ? el.scrollTop + el.clientHeight < el.scrollHeight - 1
+      : el.scrollTop > 0;
+  }
+  function attachWheelHandler() {
+    const area = document.getElementById('kanban-area');
+    if (!area) return;
+    area.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // let horizontal trackpad gestures pass
+      if (window.matchMedia('(max-width: 768px)').matches) return; // mobile: native vertical scroll
+      const colBody = e.target.closest('.col-body')
+                   || e.target.closest('.kanban-col')?.querySelector('.col-body');
+      if (_canScrollY(colBody, e.deltaY)) {
+        e.preventDefault();
+        colBody.scrollTop += e.deltaY;
+      } else if (area.scrollWidth > area.clientWidth + 1) {
+        e.preventDefault();
+        area.scrollLeft += e.deltaY;
+      }
+      // Neither can move → don't preventDefault; let the browser scroll natively.
+    }, { passive: false });
+  }
+
   /* ── Fetch subtopics from Gemini ── */
   async function fetchTopicData(topicId) {
     const topic = topics.find(t => t.id === topicId);
     if (!topic) return;
 
-    // Set fetching state
+    // Set fetching state and re-render immediately — the column shows skeletons
+    // (or dims its cards) so Retry visibly does something the moment it's clicked.
     await TopicService.updateTopic(topicId, { status: 'fetching' });
     topic.status = 'fetching';
-    updateColFetchingState(topicId, true);
+    renderColumn(topicId);
 
     const result = await GeminiService.fetchSubtopics(topic);
     if (result && result.sourceReport && window.Wire) Wire.update(result.sourceReport);
@@ -82,7 +113,6 @@ const Kanban = (() => {
       topic.errorMessage = errorMessage;
     }
 
-    updateColFetchingState(topicId, false);
     renderColumn(topicId);
     renderSearchLog();
   }
@@ -93,8 +123,10 @@ const Kanban = (() => {
     if (!area) return;
     area.innerHTML = '';
 
-    // Pinned column first — only when there are pinned subtopics
-    if (TopicService.getPinnedSubtopics(topics).length > 0) area.appendChild(buildPinnedColumn());
+    // Pinned column first — but only when something is actually pinned
+    if (TopicService.getPinnedSubtopics(topics).length > 0) {
+      area.appendChild(buildPinnedColumn());
+    }
 
     if (topics.length === 0) {
       area.appendChild(buildEmptyState());
@@ -111,8 +143,24 @@ const Kanban = (() => {
       area.appendChild(buildColumn(topic));
     });
 
-    // Dossier column last — only when there are filed articles
-    if (window.Dossier && ArticleService.count() > 0) area.appendChild(Dossier.buildColumn());
+    // Dossier column last — only when at least one article is filed
+    if (window.Dossier && window.ArticleService?.count() > 0) {
+      area.appendChild(Dossier.buildColumn());
+    }
+  }
+
+  /* ── Pinned column appears/updates/disappears with its content ── */
+  function refreshPinnedColumn() {
+    const area = document.getElementById('kanban-area');
+    if (!area) return;
+    const existing = document.getElementById('pinned-col');
+    if (TopicService.getPinnedSubtopics(topics).length === 0) {
+      existing?.remove();
+      return;
+    }
+    const fresh = buildPinnedColumn();
+    if (existing) existing.replaceWith(fresh);
+    else area.prepend(fresh);
   }
 
   /* ── Render a single column in place ── */
@@ -123,25 +171,8 @@ const Kanban = (() => {
     if (!existing) { renderBoard(); return; }
     const fresh = buildColumn(topic);
     existing.replaceWith(fresh);
-    // Show/hide pinned column based on whether any subtopics are pinned
-    const pinned = TopicService.getPinnedSubtopics(topics);
-    const pinnedCol = document.getElementById('pinned-col');
-    if (pinned.length > 0) {
-      const newCol = buildPinnedColumn();
-      if (pinnedCol) pinnedCol.replaceWith(newCol);
-      else document.getElementById('kanban-area')?.prepend(newCol);
-    } else if (pinnedCol) {
-      pinnedCol.remove();
-    }
-  }
-
-  /* ── Update only the fetching visual state of a column ── */
-  function updateColFetchingState(topicId, isFetching) {
-    const col = document.getElementById(`col-${topicId}`);
-    if (!col) return;
-    col.querySelectorAll('.subtopic-card').forEach(c => {
-      c.classList.toggle('fetching', isFetching);
-    });
+    // Re-render pinned column (pinned subtopics may have changed)
+    refreshPinnedColumn();
   }
 
   /* ════════════════════════════════
@@ -317,19 +348,29 @@ const Kanban = (() => {
     card.id = `card-${sub.id}`;
     card.setAttribute('data-subtopic-id', sub.id);
     card.setAttribute('data-topic-id', topicId);
+    card.title = 'Double-click for full view';
+
+    // Double-click anywhere on the card (except links/buttons) → full-screen view
+    card.addEventListener('dblclick', e => {
+      if (e.target.closest('a, button')) return;
+      e.preventDefault();
+      openFullscreen(sub.id, topicId);
+    });
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
 
     // Source bubbles
-    const webCount = (sub.sources?.web     || []).length;
-    const rssCount = (sub.sources?.rss     || []).length;
-    const ytCount  = (sub.sources?.youtube || []).length;
+    const webCount    = (sub.sources?.web     || []).length;
+    const rssCount    = (sub.sources?.rss     || []).length;
+    const ytCount     = (sub.sources?.youtube || []).length;
+    const redditCount = (sub.sources?.reddit  || []).length;
     const bubbles = [
-      webCount > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
-      rssCount > 0 ? `<span class="source-bubble rss-bubble">${rssSvg(9)}${rssCount}</span>` : '',
-      ytCount  > 0 ? `<span class="source-bubble youtube-bubble">${youtubeSvg(9)}${ytCount}</span>` : '',
+      webCount    > 0 ? `<span class="source-bubble web-bubble">${webSvg(9)}${webCount}</span>` : '',
+      rssCount    > 0 ? `<span class="source-bubble rss-bubble">${rssSvg(9)}${rssCount}</span>` : '',
+      ytCount     > 0 ? `<span class="source-bubble youtube-bubble">${youtubeSvg(9)}${ytCount}</span>` : '',
+      redditCount > 0 ? `<span class="source-bubble reddit-bubble">${redditSvg(9)}${redditCount}</span>` : '',
     ].join('');
-    const totalSources = webCount + rssCount + ytCount;
+    const totalSources = webCount + rssCount + ytCount + redditCount;
 
     card.innerHTML = `
       <div class="card-header" onclick="Kanban.toggleCard('${sub.id}', '${topicId}', event)">
@@ -387,6 +428,7 @@ const Kanban = (() => {
       { key: 'web',     label: 'Web',     iconCls: 'web-icon-sm',     icon: webSvg(10) },
       { key: 'rss',     label: 'RSS',     iconCls: 'rss-icon-sm',     icon: rssSvg(10) },
       { key: 'youtube', label: 'YouTube', iconCls: 'youtube-icon-sm', icon: youtubeSvg(10) },
+      { key: 'reddit',  label: 'Reddit',  iconCls: 'reddit-icon-sm',  icon: redditSvg(10) },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -603,7 +645,7 @@ const Kanban = (() => {
     const topic = topics.find(t => t.id === topicId);
     const sub   = topic?.subtopics?.find(s => s.id === subtopicId);
     if (sub) sub.pinned = newPinned;
-    // Re-render affected column; pinned col is handled inside renderColumn
+    // Re-render affected column and pinned col (renderColumn refreshes pinned too)
     renderColumn(topicId);
   }
 
@@ -625,7 +667,6 @@ const Kanban = (() => {
       if (res?.topic) topic.dismissedSubtopics = res.topic.dismissedSubtopics;
     }
     renderColumn(topicId);
-    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
   }
 
   async function refreshCard(topicId) {
@@ -730,7 +771,7 @@ const Kanban = (() => {
     if (!overlay || !body) return;
 
     const scoreClass = sub.score >= 70 ? 'score-high' : sub.score >= 40 ? 'score-mid' : 'score-low';
-    const totalSrc   = (sub.sources?.web?.length || 0) + (sub.sources?.rss?.length || 0) + (sub.sources?.youtube?.length || 0);
+    const totalSrc   = (sub.sources?.web?.length || 0) + (sub.sources?.rss?.length || 0) + (sub.sources?.youtube?.length || 0) + (sub.sources?.reddit?.length || 0);
 
     body.innerHTML = `
       <div class="fullscreen-identifier">${esc(topic?.name || 'Topic')}</div>
@@ -765,6 +806,7 @@ const Kanban = (() => {
       { key: 'web',     label: 'Web sources' },
       { key: 'rss',     label: 'RSS feeds' },
       { key: 'youtube', label: 'YouTube' },
+      { key: 'reddit',  label: 'Reddit' },
     ];
     return groups.map(g => {
       const items = sub.sources?.[g.key] || [];
@@ -819,34 +861,10 @@ const Kanban = (() => {
      SEARCH LOG SIDEBAR
   ════════════════════════════════ */
 
+  /* Shared renderer lives in utils.js (SidebarLog) so every page's sidebar
+     shows the same log; here it stays interactive because window.Kanban exists. */
   async function renderSearchLog() {
-    const log  = await TopicService.getSearchLog();
-    const list = document.getElementById('log-list');
-    if (!list) return;
-
-    if (log.length === 0) {
-      list.innerHTML = `
-        <div class="log-empty">
-          <div class="log-empty-ring">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-              <circle cx="7" cy="7" r="5.5"/>
-              <line x1="7" y1="4.5" x2="7" y2="7.5"/>
-              <circle cx="7" cy="9.5" r="0.5" fill="currentColor"/>
-            </svg>
-          </div>
-          <div class="log-empty-text">No searches yet.<br/>Add a topic to begin.</div>
-        </div>`;
-      return;
-    }
-
-    list.innerHTML = log.slice(0, 30).map(entry => `
-      <div class="log-item" onclick="Kanban.rerunSearch('${entry.id}', '${esc(entry.query)}', '${esc(entry.topicName)}')">
-        <div class="log-dot"></div>
-        <div class="log-content">
-          <div class="log-query">${esc(entry.query)}</div>
-          <div class="log-time">${timeAgo(entry.createdAt)}</div>
-        </div>
-      </div>`).join('');
+    SidebarLog.render();
   }
 
   async function rerunSearch(logId, query, topicName) {
@@ -900,13 +918,6 @@ const Kanban = (() => {
 
   function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
   function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-  function timeAgo(iso) {
-    const d = (Date.now() - new Date(iso)) / 1000;
-    if (d < 60)    return 'just now';
-    if (d < 3600)  return `${Math.floor(d / 60)}m ago`;
-    if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-    return `${Math.floor(d / 86400)}d ago`;
-  }
   function dragIcon() {
     return `<svg viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2.5" r="1"/><circle cx="7" cy="2.5" r="1"/><circle cx="3" cy="5" r="1"/><circle cx="7" cy="5" r="1"/><circle cx="3" cy="7.5" r="1"/><circle cx="7" cy="7.5" r="1"/></svg>`;
   }
@@ -924,6 +935,9 @@ const Kanban = (() => {
   }
   function webSvg(size = 12) {
     return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="${size}" height="${size}"><circle cx="10" cy="10" r="8"/><path d="M10 2c-2 2-3 5-3 8s1 6 3 8M10 2c2 2 3 5 3 8s-1 6-3 8"/><line x1="2" y1="10" x2="18" y2="10"/></svg>`;
+  }
+  function redditSvg(size = 12) {
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="${size}" height="${size}"><circle cx="12" cy="14" r="7"/><circle cx="9.5" cy="13.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="13.5" r="1.1" fill="currentColor" stroke="none"/><path d="M9 16.8c1 .8 2 1.1 3 1.1s2-.3 3-1.1"/><line x1="12" y1="7" x2="14" y2="3.8"/><circle cx="14.6" cy="3.4" r="1.1" fill="currentColor" stroke="none"/></svg>`;
   }
 
   function removeTopicFromBoard(topicId) {
@@ -962,7 +976,7 @@ window.Kanban = Kanban;
 const ColMenu = (() => {
   let _pendingAction = null; // { type, topicId }
   let _editTopicId   = null;
-  let _editSources   = { web: [], rss: [], youtube: [] };
+  let _editSources   = { web: [], rss: [], youtube: [], reddit: [] };
   let _editStrict    = false;
   let _editBroad     = false;
   let _editMaxSubs   = 3;
@@ -1135,6 +1149,7 @@ const ColMenu = (() => {
       web:     [...(topic.sources?.web     || [])],
       rss:     [...(topic.sources?.rss     || [])],
       youtube: [...(topic.sources?.youtube || [])],
+      reddit:  [...(topic.sources?.reddit  || [])],
     };
     _editStrict  = !!topic.strictMode;
     _editBroad   = !!topic.allSourcesEnabled;
@@ -1147,7 +1162,7 @@ const ColMenu = (() => {
     syncEditStrictUI();
     syncEditBroadUI();
     syncEditStepperUI();
-    ['web','rss','youtube'].forEach(t => {
+    ['web','rss','youtube','reddit'].forEach(t => {
       const el = document.getElementById(`edit-${t}-input`);
       if (el) el.value = '';
     });
@@ -1190,7 +1205,7 @@ const ColMenu = (() => {
   }
 
   function renderEditTags() {
-    ['web','rss','youtube'].forEach(type => {
+    ['web','rss','youtube','reddit'].forEach(type => {
       const container = document.getElementById(`edit-${type}-tags`);
       if (!container) return;
       container.innerHTML = '';
@@ -1215,6 +1230,11 @@ const ColMenu = (() => {
     if (!val) return;
     if (type === 'web') val = val.replace(/^https?:\/\//i, '').replace(/^www\./, '').split(/[?#]/)[0].replace(/\/+$/, '');
     if (type === 'rss' && !/^https?:\/\//i.test(val)) val = 'https://' + val;
+    if (type === 'reddit') {
+      const s = val.replace(/^(https?:\/\/)?(www\.|old\.|new\.)?reddit\.com/i, '')
+        .replace(/^\/+/, '').replace(/^r\//i, '').split(/[/?#]/)[0].trim();
+      val = s ? 'r/' + s : '';
+    }
     // youtube: keep raw (@handle / channel URL / UC… id) — the Worker resolves it.
     if (!val || _editSources[type].includes(val)) { input.value = ''; return; }
     _editSources[type].push(val);

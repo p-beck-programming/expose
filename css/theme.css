@@ -99,10 +99,12 @@ button { font-family:inherit; }
 ::-webkit-scrollbar-thumb { background:var(--line); border-radius:5px; border:2px solid var(--void); }
 ::-webkit-scrollbar-thumb:hover { background:var(--faint); }
 
-/* ═══════════ App shell ═══════════ */
-.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:minmax(0,1fr); height:100vh; transition:grid-template-columns .22s ease; }
-html.sidebar-collapsed .layout { grid-template-columns:var(--sidebar-collapsed-w) 1fr; }
-.main { display:flex; flex-direction:column; min-width:0; }
+/* ═══════════ App shell ═══════════
+   grid-template-rows:100% + min-height:0 on .main are load-bearing:
+   without them the implicit grid row auto-sizes to content, .main grows
+   past 100vh, and column bodies never overflow — so they never scroll. */
+.layout { display:grid; grid-template-columns:var(--sidebar-w) 1fr; grid-template-rows:100%; height:100vh; overflow:hidden; }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; }
 .content { flex:1; min-height:0; padding:14px 16px 16px; display:flex; }
 
 /* Mobile bottom tab bar — hidden on desktop, shown in mobile media query below */
@@ -110,9 +112,10 @@ html.sidebar-collapsed .layout { grid-template-columns:var(--sidebar-collapsed-w
 
 /* ═══════════ Sidebar ═══════════ */
 .sidebar {
+  width:var(--sidebar-w); flex-shrink:0;
   background:var(--panel); border-right:1px solid var(--line);
-  display:flex; flex-direction:column; overflow:hidden;
-  width:var(--sidebar-w); flex-shrink:0; transition:width .22s ease;
+  display:flex; flex-direction:column; overflow-y:auto;
+  transition:width var(--t-base);
 }
 html.sidebar-collapsed .sidebar { width:var(--sidebar-collapsed-w); }
 .sidebar-brand { padding:16px 16px 14px; border-bottom:1px solid var(--line-soft); }
@@ -147,7 +150,13 @@ html.sidebar-collapsed .sidebar { width:var(--sidebar-collapsed-w); }
 .log-list { overflow-y:auto; flex:1; }
 .log-entry { padding:7px 8px; border-radius:var(--r-sm); }
 .log-entry:hover { background:var(--panel2); }
-.log-query { font-family:var(--font-mono); font-size:11px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.log-item { display:flex; align-items:flex-start; gap:6px; padding:4px 8px; border-radius:var(--r-sm); cursor:pointer; }
+.log-item:hover { background:var(--panel2); }
+.log-item:hover .log-query { color:var(--txt); }
+.log-dot { width:4px; height:4px; border-radius:50%; background:var(--acc); opacity:.65; flex-shrink:0; margin-top:5px; }
+.log-content { flex:1; min-width:0; }
+.log-query { font-family:var(--font-mono); font-size:10px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.log-time { font-family:var(--font-mono); font-size:8.5px; color:var(--faint); margin-top:1px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .log-meta { font-family:var(--font-mono); font-size:9.5px; color:var(--faint); margin-top:2px; }
 .log-empty { text-align:center; padding:22px 8px; color:var(--faint); }
 .log-empty-ring { width:30px; height:30px; margin:0 auto 8px; border:1px solid var(--line); border-radius:50%; display:flex; align-items:center; justify-content:center; }
@@ -179,36 +188,37 @@ html.sidebar-collapsed .sidebar { width:var(--sidebar-collapsed-w); }
 }
 .palette-select:hover { color:var(--txt); border-color:var(--faint); }
 
-/* Sidebar toggle button */
-.sidebar-toggle {
-  width:22px; height:22px; border:none; background:none;
-  color:var(--faint); cursor:pointer; border-radius:var(--r-sm);
+/* ── Sidebar collapse ──
+   Toggled via body.sidebar-collapsed (Sidebar in utils.js). The rail keeps
+   only the brand mark (which reopens it) and the nav/footer icons. */
+.sidebar-collapse-btn {
+  margin-left:auto; width:22px; height:22px; flex-shrink:0;
+  border:1px solid transparent; border-radius:var(--r-sm);
+  background:none; color:var(--faint); cursor:pointer;
   display:flex; align-items:center; justify-content:center;
-  flex-shrink:0; margin-left:auto; transition:color .15s;
 }
-.sidebar-toggle:hover { color:var(--txt); background:var(--panel2); }
-.sidebar-toggle svg { width:12px; height:12px; transition:transform .22s ease; }
-html.sidebar-collapsed .sidebar-toggle svg { transform:rotate(180deg); }
+.sidebar-collapse-btn:hover { color:var(--txt); border-color:var(--line); }
+.sidebar-collapse-btn svg { width:12px; height:12px; }
 
-/* Collapsed sidebar content */
-html.sidebar-collapsed .brand-text,
-html.sidebar-collapsed .nav-label,
-html.sidebar-collapsed .search-log,
-html.sidebar-collapsed .user-email,
-html.sidebar-collapsed .palette-select { display:none; }
-
-html.sidebar-collapsed .brand-row { justify-content:center; }
-html.sidebar-collapsed .sidebar-toggle { display:none; }
-html.sidebar-collapsed .sidebar-brand { padding:14px 10px; }
-html.sidebar-collapsed .brand-mark { cursor:pointer; transition:opacity .15s; }
-html.sidebar-collapsed .brand-mark:hover { opacity:.75; }
-html.sidebar-collapsed .nav-label-text { display:none; }
-
-html.sidebar-collapsed .nav-section { padding:14px 4px 6px; }
-html.sidebar-collapsed .nav-item { padding:8px 4px; justify-content:center; }
-
-html.sidebar-collapsed .sidebar-footer { flex-direction:column; padding:8px 4px; gap:6px; align-items:center; }
-html.sidebar-collapsed .user-pill { flex:none; padding:4px; }
+body.sidebar-collapsed { --sidebar-w:58px; }
+body.sidebar-collapsed .brand-name,
+body.sidebar-collapsed .brand-sub,
+body.sidebar-collapsed .nav-label,
+body.sidebar-collapsed .search-log,
+body.sidebar-collapsed .user-email,
+body.sidebar-collapsed .palette-select,
+body.sidebar-collapsed .sidebar-collapse-btn { display:none; }
+body.sidebar-collapsed .sidebar-brand { padding:16px 0 14px; }
+body.sidebar-collapsed .brand-row { justify-content:center; }
+body.sidebar-collapsed .brand-mark { cursor:pointer; }
+body.sidebar-collapsed .brand-mark:hover { background:var(--acc-hi); }
+body.sidebar-collapsed .nav-section { padding:14px 8px 6px; }
+body.sidebar-collapsed .nav-item { justify-content:center; gap:0; padding:10px 0; font-size:0; }
+body.sidebar-collapsed .nav-item svg { width:16px; height:16px; }
+body.sidebar-collapsed .nav-item.active { border-left-color:transparent; border-radius:var(--r-md); }
+body.sidebar-collapsed .search-log ~ .sidebar-footer,
+body.sidebar-collapsed .sidebar-footer { flex-direction:column; gap:8px; padding:10px 6px; margin-top:auto; }
+body.sidebar-collapsed .user-pill { justify-content:center; padding:5px 0; width:100%; flex:0 0 auto; }
 
 /* ═══════════ Topbar: the wire ═══════════ */
 .topbar {
@@ -276,6 +286,50 @@ html.sidebar-collapsed .user-pill { flex:none; padding:4px; }
 .btn-primary:hover { background:var(--acc-hi); border-color:var(--acc-hi); }
 .btn-ghost { background:none; }
 .btn-sm { padding:6px 12px; font-size:11px; }
+
+/* ═══════════ Mobile bottom nav (Apple-style tab bar) ═══════════
+   Injected by MobileNav (utils.js) on app pages; CSS shows it ≤768px. */
+.mobile-nav { display:none; }
+
+@media (max-width: 768px) {
+  /* Sidebar goes away — the bottom bar is the navigation */
+  .sidebar { display:none; }
+  .layout { grid-template-columns:1fr; height:100vh; height:100dvh; }
+  .app-layout { height:100vh; height:100dvh; }
+
+  /* Topbar: pinned at the top, wraps its tools, drops the wire ticker */
+  .topbar {
+    position:sticky; top:0; z-index:60;
+    flex-wrap:wrap; height:auto; min-height:var(--topbar-h);
+    padding:8px 10px; gap:8px; row-gap:8px;
+  }
+  .wire { display:none; }
+  .search-wrap { order:5; flex-basis:100%; width:100%; max-width:none !important; }
+  .topbar-right { margin-left:auto; }
+
+  /* Content scrolls vertically; leave room for the tab bar */
+  .content { padding:10px 10px calc(76px + env(safe-area-inset-bottom)); }
+  .settings-main .settings-layout { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+  .lib-content { padding-bottom:calc(84px + env(safe-area-inset-bottom)) !important; }
+
+  .mobile-nav {
+    display:flex; justify-content:space-around; align-items:stretch;
+    position:fixed; left:0; right:0; bottom:0; z-index:400;
+    background:var(--panel); border-top:1px solid var(--line);
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 18px rgba(0,0,0,.25);
+  }
+  .mobile-nav-item {
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    flex:1; padding:5px 0 3px; border-radius:var(--r-md);
+    color:var(--faint); text-decoration:none;
+    font-family:var(--font-ui); font-size:9.5px; font-weight:600; letter-spacing:.1em;
+    text-transform:uppercase;
+  }
+  .mobile-nav-item svg { width:19px; height:19px; }
+  .mobile-nav-item.active { color:var(--acc-hi); }
+  .mobile-nav-item:active { background:var(--panel2); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
