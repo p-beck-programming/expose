@@ -32,7 +32,6 @@ const Kanban = (() => {
     topics = await TopicService.getTopics();
     renderBoard();
     renderSearchLog();
-    attachWheelHandler();
 
     // Listen for new topics from the overlay
     document.addEventListener('topic:created', async e => {
