@@ -124,8 +124,10 @@ const Kanban = (() => {
     if (!area) return;
     area.innerHTML = '';
 
-    // Pinned column always first
-    area.appendChild(buildPinnedColumn());
+    // Pinned column first — but only when something is actually pinned
+    if (TopicService.getPinnedSubtopics(topics).length > 0) {
+      area.appendChild(buildPinnedColumn());
+    }
 
     if (topics.length === 0) {
       area.appendChild(buildEmptyState());
@@ -142,8 +144,24 @@ const Kanban = (() => {
       area.appendChild(buildColumn(topic));
     });
 
-    // Dossier column always last — filed articles live alongside the topics
-    if (window.Dossier) area.appendChild(Dossier.buildColumn());
+    // Dossier column last — only when at least one article is filed
+    if (window.Dossier && window.ArticleService?.count() > 0) {
+      area.appendChild(Dossier.buildColumn());
+    }
+  }
+
+  /* ── Pinned column appears/updates/disappears with its content ── */
+  function refreshPinnedColumn() {
+    const area = document.getElementById('kanban-area');
+    if (!area) return;
+    const existing = document.getElementById('pinned-col');
+    if (TopicService.getPinnedSubtopics(topics).length === 0) {
+      existing?.remove();
+      return;
+    }
+    const fresh = buildPinnedColumn();
+    if (existing) existing.replaceWith(fresh);
+    else area.prepend(fresh);
   }
 
   /* ── Render a single column in place ── */
@@ -155,8 +173,7 @@ const Kanban = (() => {
     const fresh = buildColumn(topic);
     existing.replaceWith(fresh);
     // Re-render pinned column (pinned subtopics may have changed)
-    const pinnedCol = document.getElementById('pinned-col');
-    if (pinnedCol) pinnedCol.replaceWith(buildPinnedColumn());
+    refreshPinnedColumn();
   }
 
   /* ════════════════════════════════
@@ -629,9 +646,8 @@ const Kanban = (() => {
     const topic = topics.find(t => t.id === topicId);
     const sub   = topic?.subtopics?.find(s => s.id === subtopicId);
     if (sub) sub.pinned = newPinned;
-    // Re-render affected column and pinned col
+    // Re-render affected column and pinned col (renderColumn refreshes pinned too)
     renderColumn(topicId);
-    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
   }
 
   async function dismissTombstone(topicId, subtopicId) {
@@ -652,7 +668,6 @@ const Kanban = (() => {
       if (res?.topic) topic.dismissedSubtopics = res.topic.dismissedSubtopics;
     }
     renderColumn(topicId);
-    document.getElementById('pinned-col')?.replaceWith(buildPinnedColumn());
   }
 
   async function refreshCard(topicId) {

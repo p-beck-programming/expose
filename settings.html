@@ -179,7 +179,7 @@ html, body { height: 100%; overflow: hidden; }
                 <line x1="6.5" y1="4" x2="6.5" y2="7"/>
                 <circle cx="6.5" cy="9" r="0.5" fill="currentColor"/>
               </svg>
-              The free Gemini API tier includes 500 Google Search-grounded requests per day. Aggressive refresh intervals (5–15 min) across many topics may exhaust this limit. Monitor your usage at <a href="https://aistudio.google.com" target="_blank" style="color:var(--warn)">aistudio.google.com</a>.
+              Each refresh makes one small text-only Gemini request per active topic. Daily free-tier limits depend on the model picked above — Flash-Lite and Gemma allow the most requests per day, Flash the fewest. Topics reuse results for 30 minutes, so intervals shorter than that mostly serve from cache. Monitor usage at <a href="https://aistudio.google.com" target="_blank" style="color:var(--warn)">aistudio.google.com</a>.
             </div>
           </div>
         </div>
