@@ -36,10 +36,16 @@ expose/
 
 ---
 
-## Current Stage: Static Prototype
+## Current Stage: Static Site + Supabase Backend
 
-All data is stored in **localStorage**. No backend, no build step, no dependencies.
-To run: open `dashboard.html` in any modern browser. That's it.
+Accounts and topics live in **Supabase** (Postgres + Auth): users sign in with
+email/password or Google and see their topics from any device. localStorage is
+only a per-page cache — never the source of truth. Until you paste your Supabase
+keys into `js/supabase.client.js` (see the Supabase section below) the app runs
+in **local-only mode**: browsing works, but login/signup shows a clear
+"Cloud sync is not configured" error.
+
+There is still no build step and no server of your own to run.
 
 For local development with proper routing (so relative paths resolve correctly):
 ```bash
@@ -172,66 +178,59 @@ For a multi-user production deployment:
 
 ---
 
-## Migration: localStorage → Real Database
+## Supabase: Accounts + Cross-Device Topics (one-time setup)
 
-Every service file is written as an abstraction layer. Swapping the data layer
-requires changes in exactly one place per service — the service file itself.
-No component or UI code needs to change.
+The auth/data backend is **Supabase** (free tier: 500 MB Postgres, 50k monthly
+active users). Security comes from **Supabase Auth** (bcrypt password hashing,
+JWT sessions, email verification, Google OAuth) plus **Row Level Security** —
+the browser talks to the database directly with the *public* anon key, and RLS
+policies make each user's row invisible to everyone else. There is no secret
+to hide in the client, and no server of your own to run.
 
-### auth.service.js
-```
-Current:  reads/writes localStorage keys 'expose_users_v1', 'expose_session_v1'
-Swap to:  fetch('/api/auth/signup', ...)  POST { email, password }
-          fetch('/api/auth/login', ...)   POST { email, password }
-          fetch('/api/auth/me', ...)      GET  (uses httpOnly cookie session)
-          fetch('/api/auth/logout', ...)  POST
-```
-Recommended backend: **Supabase Auth** (free tier, drop-in) or **Firebase Auth**.
-Change: replace the 4 localStorage methods with 4 fetch calls. UI is untouched.
+### 1. Create the project
+1. [supabase.com](https://supabase.com) → New project (free plan)
+2. Pick any name/region; set a strong database password (you won't need it in the app)
 
-### topic.service.js
-```
-Current:  reads/writes localStorage key 'expose_topics_v1'
-Swap to:  fetch('/api/topics', ...)          GET    → list all topics for user
-          fetch('/api/topics', ...)          POST   → create topic
-          fetch('/api/topics/:id', ...)      PATCH  → update (rename, pin, etc.)
-          fetch('/api/topics/:id', ...)      DELETE → delete topic
-```
-Recommended backend: **Supabase Postgres** or **PlanetScale MySQL**.
-Schema hint:
-```sql
-CREATE TABLE topics (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
-  name        TEXT NOT NULL,
-  sources     JSONB NOT NULL DEFAULT '{}',
-  all_sources BOOLEAN DEFAULT FALSE,
-  pinned      BOOLEAN DEFAULT FALSE,
-  created_at  TIMESTAMPTZ DEFAULT NOW(),
-  updated_at  TIMESTAMPTZ DEFAULT NOW()
-);
+### 2. Create the table, policies, and functions
+1. Dashboard → **SQL Editor** → New query
+2. Paste the entire contents of `supabase/setup.sql` → **Run**
+   (creates the `user_data` table, RLS policies, the signup trigger, and the
+   `delete_user()` self-deletion function)
 
-CREATE TABLE subtopics (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  topic_id    UUID REFERENCES topics(id) ON DELETE CASCADE,
-  name        TEXT NOT NULL,
-  summary     TEXT,
-  score       INTEGER,
-  sources     JSONB,
-  viewed      BOOLEAN DEFAULT FALSE,
-  expired     BOOLEAN DEFAULT FALSE,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
+### 3. Wire the app to your project
+1. Dashboard → **Settings → API**: copy the **Project URL** and the
+   **anon / public** key (never the `service_role` key)
+2. Paste both into the two constants at the top of `js/supabase.client.js`
 
-CREATE TABLE search_log (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
-  query       TEXT NOT NULL,
-  topic_id    UUID REFERENCES topics(id),
-  results     JSONB,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-```
+### 4. Auth providers
+- **Email/password** works out of the box. "Confirm email" is ON by default —
+  keep it on (recommended; the signup page handles the "check your inbox" flow)
+  or turn it off under **Authentication → Providers → Email**.
+- **Google**: Authentication → Providers → Google → enable, then follow the
+  linked guide to create an OAuth client in Google Cloud Console and paste the
+  Client ID/Secret. Under **Authentication → URL Configuration** add your site's
+  `login.html` URLs (production *and* local dev, e.g.
+  `http://localhost:3000/login.html`) to **Redirect URLs** — OAuth intentionally
+  lands back on `login.html`, which forwards to the dashboard once the session
+  is ingested.
+
+### 5. Free-tier caveat
+Free projects **pause after ~1 week without traffic** (data is kept; unpause
+from the dashboard). Any login or topic refresh counts as traffic. For a
+low-traffic deployment, add a weekly ping (e.g. a Cloudflare Worker cron that
+does `GET <PROJECT_URL>/rest/v1/` with the anon key) or just use the app.
+
+### How the sync works (for future maintenance)
+- `js/supabase.client.js` — creates the client, mirrors the session into
+  `expose_session_v1` (so the synchronous page guards still work), and exposes
+  `CloudStore`: `pull()` (cloud row → localStorage cache, once per page load)
+  and debounced `pushTopics/pushLog/pushSettings` (write-through on every edit).
+- `js/auth.service.js` — same public API as before, Supabase Auth internals.
+- `js/topic.service.js` — unchanged logic; reads go through the cache after a
+  `pull()`, writes push back up. One `user_data` row per user, JSONB columns
+  (`topics`, `settings`, `search_log`) matching the old localStorage shapes.
+- First login on a browser that has pre-cloud local topics migrates them up
+  automatically (only into an empty cloud row, and never across accounts).
 
 ### gemini.service.js
 ```
@@ -289,7 +288,9 @@ Before going live with real users:
 - [ ] Deploy `worker/expose-proxy.js` to Cloudflare Workers (paste + Deploy in dashboard)
 - [ ] Verify Worker endpoints return `ok:true` for news, rss, and youtube types
 - [ ] Move Gemini API key to a server-side proxy
-- [ ] Replace localStorage auth with a real auth provider
+- [x] Replace localStorage auth with a real auth provider (Supabase Auth + RLS — see the Supabase section)
+- [ ] Run `supabase/setup.sql` and paste the project URL + anon key into `js/supabase.client.js`
+- [ ] Enable the Google provider + add your `login.html` redirect URLs in Supabase
 - [ ] Add HTTPS (required — Gemini API blocks non-HTTPS origins)
 - [ ] Set security headers (X-Frame-Options, CSP, HSTS)
 - [ ] Remove `overlay-demo.html` from the deployed folder

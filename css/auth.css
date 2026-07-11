@@ -162,3 +162,20 @@
 }
 .save-toast.visible { opacity: 1; transform: none; }
 .save-toast svg { width: 13px; height: 13px; }
+
+/* OAuth divider + provider button (login / signup) */
+.auth-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--muted, var(--txt));
+  font-family: var(--font-ui); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.auth-divider::before,
+.auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--line, var(--border)); }
+.btn-oauth {
+  width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--line, var(--border));
+}
+.btn-oauth svg { flex-shrink: 0; }

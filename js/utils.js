@@ -39,6 +39,8 @@ const Theme = (() => {
       const s = JSON.parse(localStorage.getItem('expose_settings_v1')) || {};
       s.palette = palette;
       localStorage.setItem('expose_settings_v1', JSON.stringify(s));
+      // Follow the user across devices too (no-op when signed out / local-only).
+      if (window.CloudStore && window.AuthService?.isAuthenticated()) CloudStore.pushSettings(s);
     } catch {}
     return palette;
   }

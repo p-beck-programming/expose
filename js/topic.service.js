@@ -26,18 +26,28 @@ const TopicService = (() => {
   const TOPICS_KEY = 'expose_topics_v1';
   const LOG_KEY    = 'expose_search_log_v1';
 
-  /* ── Internal helpers ── */
+  /* ── Internal helpers ──
+     localStorage is the synchronous per-page cache; the user's RLS-protected
+     Supabase row is the source of truth. syncFromCloud() refreshes the cache
+     once per page load, and every write is pushed back up (debounced write-
+     through in CloudStore). With Supabase unconfigured this degrades cleanly
+     to the old local-only behavior. */
+  async function syncFromCloud() {
+    if (window.CloudStore) await CloudStore.pull(); // memoized: one fetch per page load
+  }
   function readTopics() {
     try { return JSON.parse(localStorage.getItem(TOPICS_KEY)) || []; } catch { return []; }
   }
   function writeTopics(topics) {
     localStorage.setItem(TOPICS_KEY, JSON.stringify(topics));
+    if (window.CloudStore) CloudStore.pushTopics(topics);
   }
   function readLog() {
     try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch { return []; }
   }
   function writeLog(log) {
     localStorage.setItem(LOG_KEY, JSON.stringify(log));
+    if (window.CloudStore) CloudStore.pushLog(log);
   }
   function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
   function uid() { return '_' + Math.random().toString(36).slice(2, 10); }
@@ -55,7 +65,9 @@ const TopicService = (() => {
   ════════════════════════════════ */
 
   async function getTopics() {
-    // → GET /api/topics
+    // Pull the signed-in user's topics from Supabase into the cache first —
+    // this is what makes the same board appear on any device.
+    await syncFromCloud();
     return readTopics();
   }
 
@@ -250,7 +262,7 @@ const TopicService = (() => {
   ════════════════════════════════ */
 
   async function getSearchLog() {
-    // → GET /api/search-log
+    await syncFromCloud();
     return readLog();
   }
 

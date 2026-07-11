@@ -291,6 +291,8 @@ html, body { height: 100%; overflow: hidden; }
   Saved
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase.client.js"></script>
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script>
@@ -298,7 +300,10 @@ Theme.init();
 Router.requireAuth();
 
 /* ── Load user and settings on mount ── */
-function init() {
+async function init() {
+  // Refresh the local cache from the user's cloud row first (memoized —
+  // instant on the repeat calls after saving a setting).
+  if (window.CloudStore) await CloudStore.pull();
   const user     = AuthService.getUser();
   const settings = AuthService.getSettings();
 

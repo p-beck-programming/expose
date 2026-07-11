@@ -1,39 +1,37 @@
 /* ═══════════════════════════════════════════════
    EXPOSÉ — auth.service.js
-   Authentication and user profile management.
+   Authentication and user profile management,
+   backed by Supabase Auth (email/password + Google).
 
-   Migration map:
-     signUp(email, pw)      → POST /api/auth/signup
-     login(email, pw)       → POST /api/auth/login
-     logout()               → POST /api/auth/logout
-     getUser()              → GET  /api/auth/me
-     updatePassword(pw)     → PATCH /api/auth/password
-     updateSettings(data)   → PATCH /api/auth/settings
-     deleteAccount()        → DELETE /api/auth/account
-     isAuthenticated()      → check session cookie / JWT
+   Requires (on pages that sign in / mutate the account):
+     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+     <script src="js/supabase.client.js"></script>
+   Pages that only *read* auth state (index.html) can skip
+   those — getUser()/isAuthenticated() read the localStorage
+   session mirror synchronously.
+
+   Cloud model:
+     Supabase Auth   → identity, bcrypt hashing, JWT sessions,
+                       email verification, OAuth (Google)
+     user_data row   → per-user settings (RLS: owner-only)
+     localStorage    → synchronous mirror/cache ONLY — holds no
+                       passwords and is never the source of truth
    ═══════════════════════════════════════════════ */
 
 const AuthService = (() => {
-  const USERS_KEY    = 'expose_users_v1';
   const SESSION_KEY  = 'expose_session_v1';
   const SETTINGS_KEY = 'expose_settings_v1';
+  const TOPICS_KEY   = 'expose_topics_v1';
+  const LOG_KEY      = 'expose_search_log_v1';
+  const OWNER_KEY    = 'expose_cloud_owner_v1';
 
-  /* ── Internals ── */
-  function getUsers() {
-    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch { return {}; }
-  }
-  function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+  // Lazy accessor — auth.service.js also loads on pages without the SDK.
+  const sb = () => window.SupabaseClient?.client || null;
 
-  function hashPw(pw) {
-    // Prototype-only hash — NOT cryptographically secure.
-    // Replace with bcrypt/argon2 server-side on migration.
-    let h = 0;
-    for (let i = 0; i < pw.length; i++) h = (Math.imul(31, h) + pw.charCodeAt(i)) | 0;
-    return h.toString(36) + '_' + pw.length;
-  }
+  const NOT_CONFIGURED =
+    'Cloud sync is not configured. Paste your Supabase URL and anon key into js/supabase.client.js (see DEPLOYMENT.md).';
 
   function validateEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
-  function delay(ms)        { return new Promise(r => setTimeout(r, ms)); }
 
   function defaultSettings() {
     return {
@@ -45,57 +43,93 @@ const AuthService = (() => {
     };
   }
 
+  // Map Supabase's raw messages onto the copy the UI already styles around.
+  function friendly(error) {
+    const msg = error?.message || 'Something went wrong. Please try again.';
+    if (/invalid login credentials/i.test(msg)) return 'Incorrect email or password.';
+    if (/email not confirmed/i.test(msg))       return 'Please confirm your email first — check your inbox for the verification link.';
+    if (/already registered/i.test(msg))        return 'An account with this email already exists.';
+    if (/rate limit|too many/i.test(msg))       return 'Too many attempts — please wait a minute and try again.';
+    if (/failed to fetch|network/i.test(msg))   return 'Could not reach the server. Check your connection and try again.';
+    return msg;
+  }
+
+  function setMirror(user) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      id: user.id, email: user.email, createdAt: user.created_at,
+    }));
+  }
+
   /* ── Sign up ── */
   async function signUp(email, password) {
-    // → POST /api/auth/signup { email, password }
-    await delay(650);
+    const c = sb();
+    if (!c) return { success: false, error: NOT_CONFIGURED };
     const key = email.toLowerCase().trim();
-    if (!validateEmail(key))  return { success: false, error: 'Please enter a valid email address.' };
+    if (!validateEmail(key))              return { success: false, error: 'Please enter a valid email address.' };
     if (!password || password.length < 8) return { success: false, error: 'Password must be at least 8 characters.' };
-    const users = getUsers();
-    if (users[key]) return { success: false, error: 'An account with this email already exists.' };
 
-    const user = {
-      id:        'u_' + Date.now(),
-      email:     key,
-      createdAt: new Date().toISOString(),
-      settings:  defaultSettings(),
-    };
-    users[key] = { ...user, passwordHash: hashPw(password) };
-    saveUsers(users);
+    const { data, error } = await c.auth.signUp({ email: key, password });
+    if (error) return { success: false, error: friendly(error) };
 
-    // Persist session
-    localStorage.setItem(SESSION_KEY,  JSON.stringify(user));
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(user.settings));
-    return { success: true, user };
+    // With "Confirm email" enabled in Supabase there is no session until the
+    // link in the inbox is clicked — tell the UI so it doesn't redirect.
+    if (!data.session) return { success: true, needsConfirmation: true, user: { email: key } };
+
+    setMirror(data.session.user); // sync, before the page redirects
+    return { success: true, user: getUser() };
   }
 
   /* ── Login ── */
   async function login(email, password) {
-    // → POST /api/auth/login { email, password }
-    await delay(650);
+    const c = sb();
+    if (!c) return { success: false, error: NOT_CONFIGURED };
     const key = email.toLowerCase().trim();
     if (!key || !password) return { success: false, error: 'Please fill in all fields.' };
-    const users  = getUsers();
-    const record = users[key];
-    if (!record)                          return { success: false, error: 'No account found with this email.' };
-    if (record.passwordHash !== hashPw(password)) return { success: false, error: 'Incorrect password. Please try again.' };
 
-    const user = { id: record.id, email: record.email, createdAt: record.createdAt, settings: record.settings };
-    localStorage.setItem(SESSION_KEY,  JSON.stringify(user));
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(user.settings || defaultSettings()));
-    return { success: true, user };
+    const { data, error } = await c.auth.signInWithPassword({ email: key, password });
+    if (error) return { success: false, error: friendly(error) };
+
+    setMirror(data.user); // sync, before the page redirects
+    return { success: true, user: getUser() };
+  }
+
+  /* ── Login with Google (OAuth) ── */
+  async function loginWithGoogle() {
+    const c = sb();
+    if (!c) return { success: false, error: NOT_CONFIGURED };
+    // Land back on login.html: it's a guest page so the synchronous auth guard
+    // won't bounce the token out of the URL; its auth listener then forwards
+    // to the dashboard once the SDK has ingested the session.
+    const redirectTo = new URL('login.html', window.location.href).href;
+    const { error } = await c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+    if (error) return { success: false, error: friendly(error) };
+    return { success: true, redirecting: true }; // browser is navigating to Google now
   }
 
   /* ── Logout ── */
-  function logout() {
-    // → POST /api/auth/logout
+  async function logout() {
+    // Clear the mirror first so guards fail closed even if signOut is cut short.
     localStorage.removeItem(SESSION_KEY);
+    clearLocalCache();
+    // scope:'local' = sign out THIS device only (default 'global' would kill
+    // the user's sessions on every other device too).
+    try { await sb()?.auth.signOut({ scope: 'local' }); } catch { /* token already dropped locally */ }
   }
 
-  /* ── Get current user ── */
+  // Wipe cached personal data (topics, log, Gemini key) on logout/delete —
+  // this may be a shared computer. The palette stays: it's a device preference.
+  function clearLocalCache() {
+    localStorage.removeItem(TOPICS_KEY);
+    localStorage.removeItem(LOG_KEY);
+    localStorage.removeItem(OWNER_KEY);
+    try {
+      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ palette: s.palette, theme: s.theme }));
+    } catch { localStorage.removeItem(SETTINGS_KEY); }
+  }
+
+  /* ── Get current user (sync — reads the session mirror) ── */
   function getUser() {
-    // → GET /api/auth/me
     try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return null; }
   }
 
@@ -103,63 +137,57 @@ const AuthService = (() => {
 
   /* ── Update password ── */
   async function updatePassword(currentPw, newPw) {
-    // → PATCH /api/auth/password { currentPassword, newPassword }
-    await delay(500);
-    const user  = getUser();
-    if (!user) return { success: false, error: 'Not authenticated.' };
-    const users = getUsers();
-    const rec   = users[user.email];
-    if (!rec)                           return { success: false, error: 'Account not found.' };
-    if (rec.passwordHash !== hashPw(currentPw)) return { success: false, error: 'Current password is incorrect.' };
-    if (!newPw || newPw.length < 8)    return { success: false, error: 'New password must be at least 8 characters.' };
-    rec.passwordHash = hashPw(newPw);
-    saveUsers(users);
+    const c = sb();
+    if (!c) return { success: false, error: NOT_CONFIGURED };
+    const user = getUser();
+    if (!user)                      return { success: false, error: 'Not authenticated.' };
+    if (!newPw || newPw.length < 8) return { success: false, error: 'New password must be at least 8 characters.' };
+
+    // Re-authenticate to prove the current password before changing it.
+    const check = await c.auth.signInWithPassword({ email: user.email, password: currentPw });
+    if (check.error) return { success: false, error: 'Current password is incorrect.' };
+
+    const { error } = await c.auth.updateUser({ password: newPw });
+    if (error) return { success: false, error: friendly(error) };
     return { success: true };
   }
 
   /* ── Update settings ── */
   async function updateSettings(data) {
-    // → PATCH /api/auth/settings { ...settingsFields }
-    await delay(300);
-    const user  = getUser();
-    if (!user) return { success: false };
-    const users = getUsers();
-    const rec   = users[user.email];
-    if (!rec) return { success: false };
-
-    const merged = { ...(rec.settings || defaultSettings()), ...data };
-    rec.settings = merged;
-    saveUsers(users);
-
-    // Update active session + settings store
-    user.settings = merged;
-    localStorage.setItem(SESSION_KEY,  JSON.stringify(user));
+    const merged = { ...defaultSettings(), ...getSettings(), ...data };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+    // Write-through to the user's RLS-protected row (debounced in CloudStore).
+    if (isAuthenticated() && window.CloudStore) CloudStore.pushSettings(merged);
     return { success: true, settings: merged };
   }
 
-  /* ── Get settings ── */
+  /* ── Get settings (sync — reads the cache; CloudStore.pull refreshes it) ── */
   function getSettings() {
     try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || defaultSettings(); } catch { return defaultSettings(); }
   }
 
   /* ── Delete account ── */
   async function deleteAccount(password) {
-    // → DELETE /api/auth/account { password }
-    await delay(700);
-    const user  = getUser();
+    const c = sb();
+    if (!c) return { success: false, error: NOT_CONFIGURED };
+    const user = getUser();
     if (!user) return { success: false, error: 'Not authenticated.' };
-    const users = getUsers();
-    const rec   = users[user.email];
-    if (!rec || rec.passwordHash !== hashPw(password)) return { success: false, error: 'Incorrect password.' };
 
-    delete users[user.email];
-    saveUsers(users);
-    // Clear all user data
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(SETTINGS_KEY);
-    localStorage.removeItem('expose_topics_v1');
-    localStorage.removeItem('expose_search_log_v1');
+    // Verify the password for email/password accounts. Google-only accounts
+    // have no password — the confirmation modal is the gate for them.
+    const { data: fresh } = await c.auth.getUser();
+    const hasPassword = (fresh?.user?.identities || []).some(i => i.provider === 'email');
+    if (hasPassword) {
+      const check = await c.auth.signInWithPassword({ email: user.email, password });
+      if (check.error) return { success: false, error: 'Incorrect password.' };
+    }
+
+    // security-definer RPC (supabase/setup.sql) — deletes the calling user
+    // from auth.users; the user_data row cascades away with it.
+    const { error } = await c.rpc('delete_user');
+    if (error) return { success: false, error: friendly(error) };
+
+    await logout(); // drop the (now-dead) token + wipe the local cache
     return { success: true };
   }
 
@@ -167,6 +195,7 @@ const AuthService = (() => {
   return {
     signUp,
     login,
+    loginWithGoogle,
     logout,
     getUser,
     isAuthenticated,
