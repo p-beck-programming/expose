@@ -1,6 +1,27 @@
 /**
- * Exposé proxy — Worker v7 (Reddit sources: per-subreddit topic search via .rss)
+ * Exposé proxy — Worker v8 (scheduled refresh: cron + Supabase + server-side Gemini)
  * Paste over the existing Worker code in the Cloudflare editor and Deploy.
+ *
+ * WHY v8: topics now live in Supabase (see supabase/schema.sql), so boards can
+ * finally update while nobody has the app open. A Cron Trigger (add it under
+ * Worker → Settings → Trigger Events; use cron `0,10,20,30,40,50 * * * *`,
+ * i.e. every 10 minutes — see DEPLOYMENT.md) calls the new `scheduled`
+ * handler, which:
+ *   1. asks Supabase (RPC topics_due_for_refresh, service-role key) for topics
+ *      whose owner's refreshRate window has elapsed — oldest first, small batch
+ *   2. re-fetches their sources through THIS file's existing handlers
+ *      (handleNews/handleRss/handleYouTube/handleReddit — no HTTP self-call)
+ *   3. clusters the items with the owner's Gemini key (same prompt/validation
+ *      as gemini.service.js v3.2 — IDs validated against the fetched pool)
+ *   4. merges subtopics with the same semantics as TopicService.setSubtopics
+ *      (dismissed names never return, unseen-for-7-days become tombstones)
+ *      and PATCHes the topic row + a search_log entry
+ * Requires two Worker secrets (Settings → Variables): SUPABASE_URL and
+ * SUPABASE_SERVICE_KEY. Without them the cron is a silent no-op, and the
+ * fetch endpoints below behave exactly as v7 — the proxy API is unchanged.
+ * Batch size is capped (TOPICS_PER_RUN, default 2) to stay well inside the
+ * free plan's 50-subrequests-per-invocation limit; the due-topics queue is
+ * ordered oldest-first, so backlog drains across consecutive runs.
  *
  * Endpoints (unchanged shape — gemini.service.js consumes the same item shape):
  *   ?type=news    → Google News RSS, fall back to GDELT DOC 2.0
@@ -111,6 +132,12 @@ export default {
     } catch { /* non-JSON / unreadable — skip caching */ }
 
     return res;
+  },
+
+  // Cron Trigger entry point — the server-side topic refresh (v8).
+  // No-op unless SUPABASE_URL + SUPABASE_SERVICE_KEY secrets are configured.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledRefresh(env));
   },
 };
 
@@ -659,4 +686,427 @@ function cacheable(data, ttl) {
     headers: { ...CORS, "Content-Type": "application/json; charset=utf-8",
                "Cache-Control": `public, max-age=${ttl}` },
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCHEDULED REFRESH (v8)
+   Server-side port of gemini.service.js's fetch → cluster pipeline.
+   Runs on the Cron Trigger; reuses the feed handlers above directly
+   (synthesized URL objects — no HTTP hop, no self-fetch recursion).
+
+   Subrequest budget (free plan: 50/invocation): each topic costs at
+   most ~6 feed plans (fetchWithRetry may retry each a couple times on
+   5xx), 1 Gemini call, and 2 Supabase writes — so TOPICS_PER_RUN
+   stays small and the due-queue drains oldest-first across runs.
+   There is deliberately NO client-style second retry round here: the
+   next cron run IS the retry.
+   ═══════════════════════════════════════════════════════════════ */
+
+const REFRESH = {
+  RECENCY:        "7d",  // feed window — matches the client pipeline
+  PER_QUERY:      8,     // items requested per source query
+  MAX_SOURCES:    6,     // rotation window size (matches client)
+  MAX_ITEMS:      30,    // total item pool sent to clustering
+  FETCH_STAGGER:  300,   // ms between plan launches (Google rate-limit safety)
+  TOPICS_PER_RUN: 2,     // override with a TOPICS_PER_RUN Worker variable (1–5)
+};
+
+// Broad-mode backup outlets — keep in sync with gemini.service.js BROAD_SITES.
+const BROAD_SITES = [
+  "reuters.com", "foxnews.com", "bbc.com", "wsj.com", "aljazeera.com",
+  "npr.org", "apnews.com", "theguardian.com", "dw.com", "thehill.com",
+  "france24.com", "scmp.com",
+];
+
+async function runScheduledRefresh(env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    console.log("[refresh] SUPABASE_URL / SUPABASE_SERVICE_KEY not configured — cron is a no-op");
+    return;
+  }
+
+  const maxN = clampInt(env.TOPICS_PER_RUN, REFRESH.TOPICS_PER_RUN, 1, 5);
+  let due;
+  try {
+    due = await sbFetch(env, "/rest/v1/rpc/topics_due_for_refresh", {
+      method: "POST",
+      body: JSON.stringify({ max_n: maxN }),
+    });
+  } catch (err) {
+    console.log("[refresh] due-topics query failed:", String(err));
+    return;
+  }
+  if (!Array.isArray(due) || due.length === 0) return;
+  console.log(`[refresh] ${due.length} topic(s) due`);
+
+  for (const row of due) {
+    const t = row.topic;
+    try {
+      await refreshTopicServerSide(env, t, row.gemini_key, row.gemini_model);
+      console.log(`[refresh] ok: ${t.name}`);
+    } catch (err) {
+      console.log(`[refresh] failed: ${t.name}: ${String(err)}`);
+      // Stamp refreshed_at anyway so a permanently-failing topic waits out its
+      // owner's full refresh window instead of hot-looping every cron run.
+      await sbPatchTopic(env, t.id, { refreshed_at: new Date().toISOString() }).catch(() => {});
+    }
+  }
+}
+
+async function refreshTopicServerSide(env, t, apiKey, model) {
+  const now = new Date().toISOString();
+  const offset = t.source_rotation_offset || 0;
+
+  // Broad topics fold the curated outlets into their web pool, then a
+  // MAX_SOURCES window rotates across everything (same as the client).
+  const rotated = rotateSources(effectiveSources(t), offset);
+
+  const { items: pooled, queriesUsed } = await fetchItemsInternal(t.name, rotated);
+  let items = pooled;
+
+  // Strict mode: web items must come from a listed domain; rss/youtube/reddit
+  // items come from user-named feeds, so they always pass.
+  if (t.strict_mode) {
+    const webList = (t.sources && t.sources.web) || [];
+    items = items.filter(it => it._kind !== "news" || isAllowedDomain(refreshDomainOf(it), webList));
+  }
+
+  if (items.length === 0) {
+    // Nothing fetched this window — rotate onward and wait for the next cycle.
+    await sbPatchTopic(env, t.id, { refreshed_at: now, source_rotation_offset: offset + 1 });
+    return;
+  }
+
+  const cap = clampInt(String(t.max_subtopics), 3, 2, 6);
+  const text = await callGeminiCluster(apiKey, model, clusterPrompt(t.name, items, cap));
+  const parsed = extractJSON(text || "");
+  if (!parsed || !Array.isArray(parsed.subtopics) || parsed.subtopics.length === 0) {
+    throw new Error("unparseable Gemini response");
+  }
+
+  // The hallucination wall: itemIds must exist in the fetched pool.
+  const byId = new Map(items.map(it => [it.poolId, it]));
+  const stamp = Date.now().toString(36);
+  const fresh = parsed.subtopics
+    .map((st, i) => {
+      const linked = (st.itemIds || []).map(id => byId.get(id)).filter(Boolean);
+      if (!st.name || linked.length === 0) return null;
+      const sources = toSourceBuckets(linked);
+      return {
+        id:              `s_${stamp}_${i + 1}`,
+        name:            String(st.name),
+        summary:         String(st.summary || ""),
+        score:           Number.isFinite(st.score) ? st.score : 50,
+        sources,
+        sourceCount:     sources.web.length + sources.rss.length + sources.youtube.length + sources.reddit.length,
+        broadSources:    [],
+        groundingChunks: [],
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, cap);
+
+  if (fresh.length === 0) throw new Error("no valid subtopics after ID validation");
+
+  if (t.all_sources_enabled) {
+    const usedTitles = new Set(
+      fresh.flatMap(s => [...s.sources.web, ...s.sources.rss, ...s.sources.youtube, ...(s.sources.reddit || [])]).map(a => a.title)
+    );
+    fresh[0].broadSources = items
+      .filter(it => !usedTitles.has(it.title))
+      .slice(0, 4)
+      .map(it => ({ title: it.title, source: it.source || it.sourceDomain || "web", url: it.url || "" }));
+  }
+
+  const merged = mergeSubtopics(t, fresh, now);
+
+  await sbPatchTopic(env, t.id, {
+    subtopics:              merged.subtopics,
+    heat_score:             merged.heatScore,
+    updated_at:             now,
+    refreshed_at:           now,
+    source_rotation_offset: offset + 1,
+  });
+
+  // One log entry per server refresh — the sidebar log shows cron activity too.
+  await sbFetch(env, "/rest/v1/search_log", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id:    t.user_id,
+      query:      queriesUsed[0] || t.name,
+      topic_id:   t.id,
+      topic_name: t.name,
+      results:    fresh.length,
+    }),
+  }).catch(err => console.log("[refresh] log insert failed:", String(err)));
+}
+
+/* ---------------- Supabase REST (service-role key) ---------------- */
+
+async function sbFetch(env, path, init = {}) {
+  const res = await fetch(env.SUPABASE_URL.replace(/\/$/, "") + path, {
+    ...init,
+    headers: {
+      "apikey":        env.SUPABASE_SERVICE_KEY,
+      "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type":  "application/json",
+      "Prefer":        "return=minimal",
+      ...(init.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => "")).slice(0, 200);
+    throw new Error(`supabase ${path} HTTP ${res.status} ${detail}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function sbPatchTopic(env, id, patch) {
+  return sbFetch(env, `/rest/v1/topics?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+/* ---------------- source selection (port of gemini.service.js) ---------------- */
+
+function normDomain(d) {
+  return String(d || "").trim().toLowerCase()
+    .replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+}
+
+function refreshDomainOf(it) {
+  return normDomain(it.sourceDomain || (it.url ? hostOf(it.url) : ""));
+}
+
+function isAllowedDomain(itemDomain, webList) {
+  if (!itemDomain) return false;
+  return (webList || []).some(src => {
+    const b = normDomain(src);
+    return b && (itemDomain === b || itemDomain.endsWith("." + b));
+  });
+}
+
+function effectiveSources(t) {
+  const sources = t.sources || {};
+  if (!t.all_sources_enabled) return sources;
+  const userWeb = sources.web || [];
+  const have = new Set(userWeb.map(normDomain));
+  return { ...sources, web: userWeb.concat(BROAD_SITES.filter(d => !have.has(normDomain(d)))) };
+}
+
+function rotateSources(sources, offset) {
+  const kinds = ["web", "rss", "youtube", "reddit"];
+  const all = kinds.flatMap(type => (sources[type] || []).map(value => ({ type, value })));
+  const total = all.length;
+  const win = total <= REFRESH.MAX_SOURCES
+    ? all
+    : Array.from({ length: REFRESH.MAX_SOURCES }, (_, i) => all[(offset % total + i) % total]);
+  const out = { web: [], rss: [], youtube: [], reddit: [] };
+  win.forEach(s => out[s.type].push(s.value));
+  return out;
+}
+
+/* ---------------- fetch stage (reuses the handlers above in-process) ---------------- */
+
+function buildInternalPlans(topicName, rotated) {
+  const plans = [];
+  (rotated.web || []).forEach(domain => {
+    const d = normDomain(domain);
+    if (d) plans.push({ label: d, kind: "news", query: `${topicName} site:${d}`,
+      params: { type: "news", q: `${topicName} site:${d}`, when: REFRESH.RECENCY, limit: String(REFRESH.PER_QUERY) } });
+  });
+  (rotated.rss || []).forEach(feed => {
+    const u = String(feed).trim();
+    if (u) plans.push({ label: hostOf(u) || u, kind: "rss", query: u,
+      params: { type: "rss", url: u, limit: String(REFRESH.PER_QUERY) } });
+  });
+  (rotated.youtube || []).forEach(ch => {
+    const c = String(ch).trim();
+    if (c) plans.push({ label: c, kind: "youtube", query: c,
+      params: { type: "youtube", channel: c, limit: String(REFRESH.PER_QUERY) } });
+  });
+  (rotated.reddit || []).forEach(sub => {
+    const s = String(sub).trim().replace(/^r\//i, "");
+    if (s) plans.push({ label: `r/${s}`, kind: "reddit", query: `${topicName} in r/${s}`,
+      params: { type: "reddit", sub: s, q: topicName, when: REFRESH.RECENCY, limit: String(REFRESH.PER_QUERY) } });
+  });
+  // Safety net: a topic with no usable sources still gets one broad query.
+  if (plans.length === 0) {
+    plans.push({ label: "(broad search)", kind: "news", query: topicName,
+      params: { type: "news", q: topicName, when: REFRESH.RECENCY, limit: "20", merge: "1" } });
+  }
+  return plans;
+}
+
+async function runInternalPlan(plan) {
+  const u = new URL("https://internal.refresh/");
+  for (const [k, v] of Object.entries(plan.params)) u.searchParams.set(k, v);
+  const res = plan.kind === "rss"     ? await handleRss(u)
+            : plan.kind === "youtube" ? await handleYouTube(u)
+            : plan.kind === "reddit"  ? await handleReddit(u)
+            :                           await handleNews(u);
+  return res.json();
+}
+
+async function fetchItemsInternal(topicName, rotated) {
+  const plans = buildInternalPlans(topicName, rotated);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const results = await Promise.allSettled(
+    plans.map((p, i) => sleep(i * REFRESH.FETCH_STAGGER).then(() => runInternalPlan(p)))
+  );
+
+  const queriesUsed = plans.map(p => p.query);
+  let all = [];
+  for (let i = 0; i < plans.length; i++) {
+    const body = results[i].status === "fulfilled" ? results[i].value : null;
+    if (body && body.ok) {
+      body.items.forEach(it => { it._kind = plans[i].kind; });
+      all = all.concat(body.items);
+    } else {
+      console.log(`[refresh] source failed: ${plans[i].label} (${body ? body.error : "exception"})`);
+    }
+  }
+
+  // Dedupe (same story via multiple queries), newest first, cap the pool.
+  const seen = new Set();
+  const items = [];
+  all.sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""));
+  for (const it of all) {
+    const key = it.urlResolved && it.url
+      ? it.url
+      : String(it.title || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push(it);
+    if (items.length >= REFRESH.MAX_ITEMS) break;
+  }
+  items.forEach((it, idx) => { it.poolId = "n" + (idx + 1); });
+
+  return { items, queriesUsed };
+}
+
+/* ---------------- cluster stage (port of gemini.service.js) ---------------- */
+
+function clusterPrompt(topicName, items, cap) {
+  const lines = items.map(it => {
+    const date = (it.publishedAt || "").slice(0, 10);
+    const snip = it.snippet ? ` | ${it.snippet.slice(0, 150)}` : "";
+    return `${it.poolId} | ${it.source || it.sourceDomain || "web"} | ${date} | ${it.title}${snip}`;
+  }).join("\n");
+
+  return `You are organizing OSINT monitoring results for the topic: "${topicName}".
+Below is a numbered list of real items fetched from live feeds.
+Each line: ID | source | date | title | optional snippet.
+
+${lines}
+
+Group these into at most ${cap} emerging subtopics (distinct stories or developments).
+
+Rules:
+- Respond with ONLY valid JSON. No markdown, no commentary, no code fences.
+- Schema: {"subtopics":[{"name":"max 8 word title","summary":"1-2 factual sentences","score":85,"itemIds":["n1","n3"]}]}
+- score: 0-100 significance/urgency of the subtopic for this monitoring topic.
+- itemIds MUST be IDs from the list above. Never invent IDs. Never include URLs anywhere.
+- Prefer subtopics supported by 2 or more items. Ignore items that fit nowhere.`;
+}
+
+async function callGeminiCluster(apiKey, model, prompt) {
+  if (!apiKey) throw new Error("no Gemini API key on profile");
+
+  // Same per-model capability handling as the client (gemini.service.js):
+  // gemma-* rejects responseMimeType; only gemini-2.5-* accepts thinkingConfig.
+  const isGemma = /^gemma/i.test(model);
+  const generationConfig = { temperature: 0.2, maxOutputTokens: 1200 };
+  if (!isGemma) generationConfig.responseMimeType = "application/json";
+  if (/^gemini-2\.5/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`gemini HTTP ${res.status}: ${err?.error?.message || ""}`.trim());
+  }
+  const data = await res.json();
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const firstJSON = parts.find(p => p.text && (p.text.includes("{") || p.text.includes("[")));
+  return firstJSON?.text || parts.find(p => p.text)?.text || "";
+}
+
+function extractJSON(text) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch {} }
+  const raw = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (raw)   { try { return JSON.parse(raw[1]); } catch {} }
+  try { return JSON.parse(text.trim()); } catch {}
+  return null;
+}
+
+function toSourceBuckets(linkedItems) {
+  const art = it => ({
+    title:       it.title,
+    source:      it.source || it.sourceDomain || "web",
+    url:         it.url || "",
+    publishedAt: it.publishedAt || "",
+  });
+  const buckets = { web: [], rss: [], youtube: [], reddit: [] };
+  for (const it of linkedItems.slice(0, REFRESH.MAX_SOURCES)) {
+    const key = ["youtube", "rss", "reddit"].includes(it._kind) ? it._kind : "web";
+    buckets[key].push(art(it));
+  }
+  return buckets;
+}
+
+/* ---------------- merge stage (port of TopicService.setSubtopics) ---------------- */
+
+function mergeSubtopics(t, fresh, now) {
+  const prev = t.subtopics || [];
+  const existing = Object.fromEntries(prev.map(s => [s.id, s]));
+  const norm = s => String(s || "").trim().toLowerCase();
+
+  const merged = fresh.map(s => {
+    const p = existing[s.id] || {};
+    return {
+      id:          s.id,
+      topicId:     t.id,
+      name:        p.userRenamed ? p.name : s.name,
+      userRenamed: p.userRenamed || false,
+      summary:     s.summary,
+      score:       s.score,
+      sourceCount: s.sourceCount,
+      sources:     s.sources || { web: [], rss: [], youtube: [], reddit: [] },
+      broadSources:s.broadSources || [],
+      viewed:      p.viewed || false,
+      pinned:      p.pinned || false,
+      expired:     false,
+      createdAt:   p.createdAt || now,
+      updatedAt:   now,
+    };
+  });
+
+  // Drop user-dismissed subtopics so they never come back on regeneration.
+  const dismissed = new Set((t.dismissed_subtopics || []).map(norm));
+  const kept = dismissed.size ? merged.filter(s => !dismissed.has(norm(s.name))) : merged;
+
+  // Expire subtopics not seen for 7 days.
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const expiredOld = prev.filter(s => {
+    const notInNew = !kept.find(m => m.id === s.id);
+    const old = new Date(s.updatedAt).getTime() < weekAgo;
+    return notInNew && old;
+  }).map(s => ({ ...s, expired: true }));
+
+  // Heat score: new subtopics per day, scaled 0–5 dots.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const heatScore = Math.min(5, kept.filter(s => new Date(s.createdAt).getTime() > dayAgo).length);
+
+  return { subtopics: [...kept, ...expiredOld], heatScore };
 }

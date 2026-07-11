@@ -12,6 +12,11 @@ try {
   document.documentElement.setAttribute('data-palette', _p);
   document.documentElement.setAttribute('data-theme', _p === 'daybreak' ? 'light' : 'dark');
 } catch(e) {}
+// Capture auth tokens in the URL hash BEFORE supabase-js consumes them:
+// password-recovery links land here as #…type=recovery, OAuth failures as #error=…
+var IS_RECOVERY  = location.hash.indexOf('type=recovery') !== -1;
+var OAUTH_ERROR  = (location.hash.match(/error_description=([^&]+)/) || [])[1] || '';
+if (OAUTH_ERROR) OAUTH_ERROR = decodeURIComponent(OAUTH_ERROR.replace(/\+/g, ' '));
 </script>
 <link rel="stylesheet" href="css/theme.css"/>
 <link rel="stylesheet" href="css/base.css"/>
@@ -71,13 +76,36 @@ try {
       <span id="login-error-msg"></span>
     </div>
 
+    <div class="alert alert-success" id="login-success" style="margin-bottom:12px">
+      <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="7" cy="7" r="5.5"/><polyline points="4,7 6.5,9.5 10,5"/>
+      </svg>
+      <span id="login-success-msg"></span>
+    </div>
+
+    <button class="btn btn-ghost btn-md" style="width:100%;margin-bottom:14px" id="google-btn" onclick="handleGoogle()">
+      <svg width="15" height="15" viewBox="0 0 24 24" style="flex:none">
+        <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/>
+        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/>
+        <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/>
+        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/>
+      </svg>
+      <span class="btn-label" style="margin-left:8px">Continue with Google</span>
+    </button>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--faint);font-size:11px;letter-spacing:0.08em" id="auth-divider">
+      <span style="flex:1;height:1px;background:var(--line)"></span>OR<span style="flex:1;height:1px;background:var(--line)"></span>
+    </div>
+
     <div class="form-group">
       <label class="form-label">Email address</label>
       <input class="input" type="email" id="email" placeholder="you@example.com" autocomplete="email"/>
     </div>
 
     <div class="form-group">
-      <label class="form-label">Password</label>
+      <label class="form-label" style="display:flex;justify-content:space-between;align-items:baseline">Password
+        <a href="#" id="forgot-link" onclick="handleForgotPassword(event)" style="font-weight:400;font-size:11px;color:var(--accent-text)">Forgot password?</a>
+      </label>
       <div class="input-wrap">
         <input class="input" type="password" id="password" placeholder="••••••••" autocomplete="current-password"/>
         <button class="pw-toggle" id="pw-toggle" type="button" onclick="togglePw()">
@@ -103,11 +131,25 @@ try {
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/supabase-config.js"></script>
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script>
-Theme.init();
-Router.requireGuest();
+let recoveryMode = false;
+
+function showError(msg) {
+  document.getElementById('login-error-msg').textContent = msg;
+  document.getElementById('login-error').classList.add('visible');
+}
+function showSuccess(msg) {
+  document.getElementById('login-success-msg').textContent = msg;
+  document.getElementById('login-success').classList.add('visible');
+}
+function clearAlerts() {
+  document.getElementById('login-error').classList.remove('visible');
+  document.getElementById('login-success').classList.remove('visible');
+}
 
 function togglePw() {
   const input  = document.getElementById('password');
@@ -117,13 +159,12 @@ function togglePw() {
 }
 
 async function handleLogin() {
+  if (recoveryMode) return handleRecovery();
   const email    = document.getElementById('email').value;
   const password = document.getElementById('password').value;
   const btn      = document.getElementById('login-btn');
-  const errBox   = document.getElementById('login-error');
-  const errMsg   = document.getElementById('login-error-msg');
 
-  errBox.classList.remove('visible');
+  clearAlerts();
   btn.classList.add('loading'); btn.disabled = true;
 
   const result = await AuthService.login(email, password);
@@ -133,14 +174,75 @@ async function handleLogin() {
   if (result.success) {
     window.location.replace('dashboard.html');
   } else {
-    errMsg.textContent = result.error;
-    errBox.classList.add('visible');
+    showError(result.error);
     const emailInput = document.getElementById('email');
     const pwInput    = document.getElementById('password');
     emailInput.classList.toggle('error', result.error.includes('email') || result.error.includes('No account'));
     pwInput.classList.toggle('error', result.error.includes('password') || result.error.includes('Incorrect'));
   }
 }
+
+async function handleGoogle() {
+  clearAlerts();
+  const btn = document.getElementById('google-btn');
+  btn.disabled = true;
+  const result = await AuthService.loginWithGoogle();
+  if (!result.success) { showError(result.error); btn.disabled = false; }
+  // On success the browser is already navigating to Google.
+}
+
+async function handleForgotPassword(e) {
+  e.preventDefault();
+  clearAlerts();
+  const email = document.getElementById('email').value;
+  const result = await AuthService.resetPassword(email);
+  if (result.success) {
+    showSuccess('If an account exists for that email, a reset link is on its way. The link brings you back here to set a new password.');
+  } else {
+    showError(result.error);
+  }
+}
+
+/* ── Password-recovery mode: the emailed reset link lands here with
+      type=recovery in the hash; supabase-js signs the user in, and the
+      password field becomes a "set new password" form. ── */
+function enterRecoveryMode() {
+  recoveryMode = true;
+  document.querySelector('.auth-title').textContent = 'Set a new password';
+  document.querySelector('.auth-sub').textContent   = 'Choose a new password for your account';
+  document.getElementById('google-btn').style.display   = 'none';
+  document.getElementById('auth-divider').style.display = 'none';
+  document.getElementById('forgot-link').style.display  = 'none';
+  document.getElementById('email').closest('.form-group').style.display = 'none';
+  document.querySelector('#login-btn .btn-label').textContent = 'Update password';
+  document.getElementById('password').placeholder = 'New password (min. 8 characters)';
+  document.getElementById('password').autocomplete = 'new-password';
+}
+
+async function handleRecovery() {
+  const password = document.getElementById('password').value;
+  const btn      = document.getElementById('login-btn');
+  clearAlerts();
+  btn.classList.add('loading'); btn.disabled = true;
+  const result = await AuthService.completePasswordReset(password);
+  btn.classList.remove('loading'); btn.disabled = false;
+  if (result.success) {
+    window.location.replace('dashboard.html');
+  } else {
+    showError(result.error);
+  }
+}
+
+/* ── Boot ── */
+(async () => {
+  Theme.init();
+  if (OAUTH_ERROR) showError(OAUTH_ERROR);
+  if (IS_RECOVERY) {
+    enterRecoveryMode(); // don't bounce to the dashboard — a session exists, but the user came to reset
+  } else {
+    await Router.requireGuest();
+  }
+})();
 
 document.addEventListener('keydown', e => { if (e.key === 'Enter') handleLogin(); });
 </script>

@@ -1,46 +1,34 @@
 /* ═══════════════════════════════════════════════
-   EXPOSÉ — topic.service.js
+   EXPOSÉ — topic.service.js  (v2: Supabase Postgres)
    All topic, subtopic, and search log operations.
 
-   Deployment note:
-   - Imported by kanban.js and dashboard.js
-   - All methods are async to mirror real API calls
-   - To migrate to a real backend, replace the
-     localStorage logic inside each method with
-     a fetch() call to your API endpoint.
-     No calling code needs to change.
+   v2: localStorage replaced with the Supabase `topics` and
+   `search_log` tables (see supabase/schema.sql). Same public API
+   as v1 — kanban.js, topic-overlay.js, and dashboard.js are
+   untouched. Row Level Security scopes every query to the
+   signed-in user, so no user_id handling is needed here.
 
-   Migration map:
-     getTopics()           → GET  /api/topics
-     createTopic(data)     → POST /api/topics
-     updateTopic(id, data) → PATCH /api/topics/:id
-     deleteTopic(id)       → DELETE /api/topics/:id
-     getSubtopics(topicId) → GET /api/topics/:id/subtopics
-     markViewed(id)        → PATCH /api/subtopics/:id/viewed
-     pinSubtopic(id)       → PATCH /api/subtopics/:id/pin
-     getSearchLog()        → GET /api/search-log
-     appendLog(entry)      → POST /api/search-log
+   Shape notes:
+   - Subtopics stay embedded as JSONB on the topic row (they are
+     regenerated wholesale every refresh; a child table buys races,
+     not value, at this scale).
+   - `status` / `errorMessage` are TRANSIENT UI state: never written
+     to the database, merged onto returned topics in-memory.
+   - Board order: `position` ascending. New topics get -Date.now()
+     so they sort first without an extra round-trip.
+   - The search log keeps a 30-entry device cache in localStorage so
+     SidebarLog can keep rendering synchronously.
    ═══════════════════════════════════════════════ */
 
 const TopicService = (() => {
-  const TOPICS_KEY = 'expose_topics_v1';
-  const LOG_KEY    = 'expose_search_log_v1';
+  const LOG_CACHE_KEY = 'expose_search_log_v1';
 
-  /* ── Internal helpers ── */
-  function readTopics() {
-    try { return JSON.parse(localStorage.getItem(TOPICS_KEY)) || []; } catch { return []; }
+  /* ── Helpers ── */
+  function uid() {
+    return (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : '_' + Math.random().toString(36).slice(2, 10);
   }
-  function writeTopics(topics) {
-    localStorage.setItem(TOPICS_KEY, JSON.stringify(topics));
-  }
-  function readLog() {
-    try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch { return []; }
-  }
-  function writeLog(log) {
-    localStorage.setItem(LOG_KEY, JSON.stringify(log));
-  }
-  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-  function uid() { return '_' + Math.random().toString(36).slice(2, 10); }
   // Subtopic cap: default 3, clamped to 2–6
   function clampSubs(n) {
     const v = Math.round(Number(n));
@@ -50,55 +38,118 @@ const TopicService = (() => {
   // refresh, so dismissal must key on the stable name instead).
   function normName(s) { return String(s || '').trim().toLowerCase(); }
 
+  const EMPTY_SOURCES = () => ({ web: [], rss: [], youtube: [], reddit: [] });
+
+  /* ── Row ↔ client shape mapping ── */
+  function rowToTopic(r) {
+    return {
+      id:                  r.id,
+      name:                r.name,
+      sources:             r.sources || EMPTY_SOURCES(),
+      strictMode:          !!r.strict_mode,
+      maxSubtopics:        r.max_subtopics,
+      allSourcesEnabled:   !!r.all_sources_enabled,
+      dismissedSubtopics:  r.dismissed_subtopics || [],
+      pinned:              !!r.pinned,
+      paused:              !!r.paused,
+      sourceRotationOffset:r.source_rotation_offset || 0,
+      createdAt:           r.created_at,
+      updatedAt:           r.updated_at,
+      refreshedAt:         r.refreshed_at,
+      heatScore:           r.heat_score || 0,
+      subtopics:           r.subtopics || [],
+      status:              'idle', // transient — never trust a stale value
+    };
+  }
+
+  // Client field → column. status/errorMessage are deliberately absent.
+  const FIELD_TO_COL = {
+    name:                 'name',
+    sources:              'sources',
+    strictMode:           'strict_mode',
+    maxSubtopics:         'max_subtopics',
+    allSourcesEnabled:    'all_sources_enabled',
+    dismissedSubtopics:   'dismissed_subtopics',
+    pinned:               'pinned',
+    paused:               'paused',
+    position:             'position',
+    sourceRotationOffset: 'source_rotation_offset',
+    heatScore:            'heat_score',
+    subtopics:            'subtopics',
+  };
+
+  function dataToPatch(data) {
+    const patch = {};
+    for (const [key, col] of Object.entries(FIELD_TO_COL)) {
+      if (key in data) patch[col] = key === 'maxSubtopics' ? clampSubs(data[key]) : data[key];
+    }
+    return patch;
+  }
+
+  async function fetchRow(id) {
+    const { data, error } = await sb.from('topics').select('*').eq('id', id).single();
+    return error ? null : data;
+  }
+
   /* ════════════════════════════════
      TOPICS
   ════════════════════════════════ */
 
   async function getTopics() {
-    // → GET /api/topics
-    return readTopics();
+    const { data, error } = await sb.from('topics')
+      .select('*')
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (error) { console.warn('[Exposé] getTopics failed:', error.message); return []; }
+    return (data || []).map(rowToTopic);
   }
 
   async function createTopic(data) {
-    // → POST /api/topics
-    // data: { name, sources, allSourcesEnabled }
-    await delay(300);
-    const topics = readTopics();
-    const topic = {
-      id:               uid(),
-      name:             data.name,
-      sources:          data.sources || { web: [], rss: [], youtube: [], reddit: [] },
-      strictMode:       !!data.strictMode,
-      maxSubtopics:     clampSubs(data.maxSubtopics),
-      allSourcesEnabled:!!data.allSourcesEnabled,
-      dismissedSubtopics:[],   // normalized names the user removed — never regenerated
-      pinned:           false,
-      createdAt:        new Date().toISOString(),
-      updatedAt:        new Date().toISOString(),
-      heatScore:        0,
-      subtopics:        [],
-      status:           'idle', // idle | fetching | error
+    // data: { name, sources, strictMode, maxSubtopics, allSourcesEnabled }
+    const row = {
+      name:                String(data.name || '').trim(),
+      sources:             data.sources || EMPTY_SOURCES(),
+      strict_mode:         !!data.strictMode,
+      max_subtopics:       clampSubs(data.maxSubtopics),
+      all_sources_enabled: !!data.allSourcesEnabled,
+      dismissed_subtopics: [],
+      pinned:              false,
+      paused:              false,
+      position:            -Date.now(), // most negative = newest = first on the board
+      heat_score:          0,
+      subtopics:           [],
     };
-    topics.unshift(topic);
-    writeTopics(topics);
-    return { success: true, topic };
+    const { data: inserted, error } = await sb.from('topics').insert(row).select().single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, topic: rowToTopic(inserted) };
   }
 
   async function updateTopic(id, data) {
-    // → PATCH /api/topics/:id
-    // data: partial topic fields to update
-    const topics = readTopics();
-    const idx = topics.findIndex(t => t.id === id);
-    if (idx === -1) return { success: false, error: 'Topic not found' };
-    topics[idx] = { ...topics[idx], ...data, updatedAt: new Date().toISOString() };
-    writeTopics(topics);
-    return { success: true, topic: topics[idx] };
+    // data: partial topic fields to update (transient fields are kept in-memory only)
+    const patch = dataToPatch(data);
+
+    let row;
+    if (Object.keys(patch).length > 0) {
+      patch.updated_at = new Date().toISOString();
+      const { data: updated, error } = await sb.from('topics')
+        .update(patch).eq('id', id).select().single();
+      if (error) return { success: false, error: error.message };
+      row = updated;
+    } else {
+      // Transient-only update (e.g. { status: 'fetching' }) — nothing to persist.
+      row = await fetchRow(id);
+      if (!row) return { success: false, error: 'Topic not found' };
+    }
+
+    const topic = rowToTopic(row);
+    if ('status' in data)       topic.status = data.status;
+    if ('errorMessage' in data) topic.errorMessage = data.errorMessage;
+    return { success: true, topic };
   }
 
   async function deleteTopic(id) {
-    // → DELETE /api/topics/:id
-    const topics = readTopics().filter(t => t.id !== id);
-    writeTopics(topics);
+    const { error } = await sb.from('topics').delete().eq('id', id);
+    if (error) return { success: false, error: error.message };
     return { success: true };
   }
 
@@ -107,31 +158,29 @@ const TopicService = (() => {
   }
 
   async function reorderTopics(orderedIds) {
-    // Called after drag-and-drop reorder
-    // → PATCH /api/topics/reorder  { ids: [...] }
-    const topics = readTopics();
-    const map = Object.fromEntries(topics.map(t => [t.id, t]));
-    const reordered = orderedIds.map(id => map[id]).filter(Boolean);
-    // Append any topics not in orderedIds (safety)
-    topics.forEach(t => { if (!orderedIds.includes(t.id)) reordered.push(t); });
-    writeTopics(reordered);
+    // Called after drag-and-drop reorder — rewrite positions 0..n-1.
+    const now = new Date().toISOString();
+    const results = await Promise.all(orderedIds.map((id, i) =>
+      sb.from('topics').update({ position: i, updated_at: now }).eq('id', id)
+    ));
+    const failed = results.find(r => r.error);
+    if (failed) return { success: false, error: failed.error.message };
     return { success: true };
   }
 
   /* ════════════════════════════════
      SUBTOPICS
+     (read-modify-write on the topic row's JSONB)
   ════════════════════════════════ */
 
   async function setSubtopics(topicId, subtopics) {
     // Called after Gemini returns data for a topic
-    // → PUT /api/topics/:id/subtopics
-    const topics = readTopics();
-    const idx = topics.findIndex(t => t.id === topicId);
-    if (idx === -1) return { success: false };
+    const row = await fetchRow(topicId);
+    if (!row) return { success: false };
     const now = new Date().toISOString();
 
     // Merge with existing — preserve user renames and pinned state
-    const existing = Object.fromEntries((topics[idx].subtopics || []).map(s => [s.id, s]));
+    const existing = Object.fromEntries((row.subtopics || []).map(s => [s.id, s]));
     const merged = subtopics.map(s => {
       const prev = existing[s.id] || {};
       return {
@@ -142,7 +191,7 @@ const TopicService = (() => {
         summary:     s.summary,
         score:       s.score,
         sourceCount: s.sourceCount,
-        sources:     s.sources || { web: [], rss: [], youtube: [], reddit: [] },
+        sources:     s.sources || EMPTY_SOURCES(),
         broadSources:s.broadSources || [],
         viewed:      prev.viewed || false,
         pinned:      prev.pinned || false,
@@ -153,92 +202,90 @@ const TopicService = (() => {
     });
 
     // Drop user-dismissed subtopics so they never come back on regeneration.
-    const dismissed = new Set((topics[idx].dismissedSubtopics || []).map(normName));
+    const dismissed = new Set((row.dismissed_subtopics || []).map(normName));
     const kept = dismissed.size
       ? merged.filter(s => !dismissed.has(normName(s.name)))
       : merged;
 
     // Expire subtopics not seen for 7 days
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const expiredOld = (topics[idx].subtopics || []).filter(s => {
+    const expiredOld = (row.subtopics || []).filter(s => {
       const notInNew = !kept.find(m => m.id === s.id);
       const old = new Date(s.updatedAt).getTime() < weekAgo;
       return notInNew && old;
     }).map(s => ({ ...s, expired: true }));
 
-    topics[idx].subtopics  = [...kept, ...expiredOld];
-    topics[idx].updatedAt  = now;
-    topics[idx].status     = 'idle';
-    topics[idx].heatScore  = calcHeatScore(kept);
+    const patch = {
+      subtopics:  [...kept, ...expiredOld],
+      updated_at: now,
+      heat_score: calcHeatScore(kept),
+    };
+    const { data: updated, error } = await sb.from('topics')
+      .update(patch).eq('id', topicId).select().single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, topic: rowToTopic(updated) };
+  }
 
-    writeTopics(topics);
-    return { success: true, topic: topics[idx] };
+  async function patchSubtopics(topicId, mutate) {
+    // Shared read-modify-write for the small per-subtopic operations below.
+    const row = await fetchRow(topicId);
+    if (!row) return { success: false };
+    const result = mutate(row) || {};
+    const { data: updated, error } = await sb.from('topics')
+      .update({
+        subtopics: row.subtopics,
+        ...(result.extraPatch || {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', topicId).select().single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, topic: rowToTopic(updated), ...result.extra };
   }
 
   async function renameSubtopic(topicId, subtopicId, name) {
-    // → PATCH /api/subtopics/:id  { name }
-    const topics = readTopics();
-    const topic  = topics.find(t => t.id === topicId);
-    if (!topic) return { success: false };
-    const sub = topic.subtopics.find(s => s.id === subtopicId);
-    if (!sub) return { success: false };
-    sub.name        = name;
-    sub.userRenamed = true;
-    sub.updatedAt   = new Date().toISOString();
-    writeTopics(topics);
-    return { success: true };
+    return patchSubtopics(topicId, row => {
+      const sub = (row.subtopics || []).find(s => s.id === subtopicId);
+      if (!sub) return;
+      sub.name        = name;
+      sub.userRenamed = true;
+      sub.updatedAt   = new Date().toISOString();
+    });
   }
 
   async function deleteSubtopic(topicId, subtopicId) {
-    // → DELETE /api/subtopics/:id
-    const topics = readTopics();
-    const topic  = topics.find(t => t.id === topicId);
-    if (!topic) return { success: false };
-    topic.subtopics = topic.subtopics.filter(s => s.id !== subtopicId);
-    writeTopics(topics);
-    return { success: true };
+    return patchSubtopics(topicId, row => {
+      row.subtopics = (row.subtopics || []).filter(s => s.id !== subtopicId);
+    });
   }
 
   // Permanently remove a single subtopic: drop it now AND blocklist its name so
   // regeneration (setSubtopics) won't bring it back. Topic + other subtopics stay.
   async function dismissSubtopic(topicId, subtopicId) {
-    const topics = readTopics();
-    const topic  = topics.find(t => t.id === topicId);
-    if (!topic) return { success: false };
-    const sub = (topic.subtopics || []).find(s => s.id === subtopicId);
-    const key = normName(sub?.name);
-    if (key) {
-      topic.dismissedSubtopics = topic.dismissedSubtopics || [];
-      if (!topic.dismissedSubtopics.map(normName).includes(key)) {
-        topic.dismissedSubtopics.push(key);
-      }
-    }
-    topic.subtopics = (topic.subtopics || []).filter(s => s.id !== subtopicId);
-    writeTopics(topics);
-    return { success: true, topic };
+    return patchSubtopics(topicId, row => {
+      const sub = (row.subtopics || []).find(s => s.id === subtopicId);
+      const key = normName(sub?.name);
+      const list = row.dismissed_subtopics || [];
+      if (key && !list.map(normName).includes(key)) list.push(key);
+      row.dismissed_subtopics = list;
+      row.subtopics = (row.subtopics || []).filter(s => s.id !== subtopicId);
+      return { extraPatch: { dismissed_subtopics: list } };
+    });
   }
 
   async function markViewed(topicId, subtopicId) {
-    // → PATCH /api/subtopics/:id/viewed
-    const topics = readTopics();
-    const topic  = topics.find(t => t.id === topicId);
-    if (!topic) return;
-    const sub = topic.subtopics.find(s => s.id === subtopicId);
-    if (sub) { sub.viewed = true; sub.updatedAt = new Date().toISOString(); }
-    writeTopics(topics);
+    return patchSubtopics(topicId, row => {
+      const sub = (row.subtopics || []).find(s => s.id === subtopicId);
+      if (sub) { sub.viewed = true; sub.updatedAt = new Date().toISOString(); }
+    });
   }
 
   async function pinSubtopic(topicId, subtopicId, pinned) {
-    // → PATCH /api/subtopics/:id/pin
-    const topics = readTopics();
-    const topic  = topics.find(t => t.id === topicId);
-    if (!topic) return { success: false };
-    const sub = topic.subtopics.find(s => s.id === subtopicId);
-    if (!sub) return { success: false };
-    sub.pinned    = pinned;
-    sub.updatedAt = new Date().toISOString();
-    writeTopics(topics);
-    return { success: true };
+    return patchSubtopics(topicId, row => {
+      const sub = (row.subtopics || []).find(s => s.id === subtopicId);
+      if (!sub) return;
+      sub.pinned    = pinned;
+      sub.updatedAt = new Date().toISOString();
+    });
   }
 
   async function dismissTombstone(topicId, subtopicId) {
@@ -249,32 +296,58 @@ const TopicService = (() => {
      SEARCH LOG
   ════════════════════════════════ */
 
+  function cacheLog(entries) {
+    try { localStorage.setItem(LOG_CACHE_KEY, JSON.stringify(entries.slice(0, 30))); } catch {}
+  }
+  function readLogCache() {
+    try { return JSON.parse(localStorage.getItem(LOG_CACHE_KEY)) || []; } catch { return []; }
+  }
+
+  function logRowToEntry(r) {
+    return {
+      id:        r.id,
+      query:     r.query,
+      topicId:   r.topic_id,
+      topicName: r.topic_name,
+      results:   r.results || 0,
+      createdAt: r.created_at,
+    };
+  }
+
   async function getSearchLog() {
-    // → GET /api/search-log
-    return readLog();
+    const { data, error } = await sb.from('search_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) { console.warn('[Exposé] getSearchLog failed:', error.message); return readLogCache(); }
+    const entries = (data || []).map(logRowToEntry);
+    cacheLog(entries);
+    return entries;
   }
 
   async function appendLog(entry) {
-    // → POST /api/search-log
     // entry: { query, topicId, topicName, resultsCount }
-    const log = readLog();
-    const record = {
-      id:        uid(),
-      query:     entry.query,
-      topicId:   entry.topicId,
-      topicName: entry.topicName,
-      results:   entry.resultsCount || 0,
-      createdAt: new Date().toISOString(),
+    const row = {
+      query:      entry.query,
+      topic_id:   entry.topicId || '',
+      topic_name: entry.topicName || '',
+      results:    entry.resultsCount || 0,
     };
-    log.unshift(record); // newest first
-    if (log.length > 100) log.splice(100); // cap at 100 entries
-    writeLog(log);
-    return { success: true, entry: record };
+    const { data, error } = await sb.from('search_log').insert(row).select().single();
+    const record = error
+      ? { id: uid(), query: row.query, topicId: row.topic_id, topicName: row.topic_name, results: row.results, createdAt: new Date().toISOString() }
+      : logRowToEntry(data);
+    cacheLog([record, ...readLogCache()]);
+    return { success: !error, entry: record };
   }
 
   async function clearLog() {
-    // → DELETE /api/search-log
-    writeLog([]);
+    cacheLog([]);
+    const user = AuthService.getUser();
+    if (user) {
+      const { error } = await sb.from('search_log').delete().eq('user_id', user.id);
+      if (error) return { success: false, error: error.message };
+    }
     return { success: true };
   }
 

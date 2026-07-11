@@ -208,14 +208,19 @@ const SidebarUI = (() => {
     loadUser();
     SidebarLog.render();
     MobileNav.mount(activePage);
+    // Fresh device: the log cache is empty until the cloud copy is pulled.
+    // getSearchLog refills the cache; re-render once it lands.
+    if (window.TopicService) {
+      TopicService.getSearchLog().then(() => SidebarLog.render()).catch(() => {});
+    }
   }
   return { init };
 })();
 window.SidebarUI = SidebarUI;
 
 /* Sign out — global because sidebar footers call it via inline onclick */
-window.handleLogout = function () {
-  AuthService.logout();
+window.handleLogout = async function () {
+  await AuthService.logout();
   window.location.replace('index.html');
 };
 
@@ -233,20 +238,19 @@ const Router = (() => {
     if (target) window.location.href = target;
   }
 
+  /* Async guards (Supabase session check) — page boot code awaits these
+     and bails out when they return false (a redirect is already underway). */
+
   /* Call on pages that require auth — redirects to login if not authenticated */
   function requireAuth() {
-    if (typeof AuthService === 'undefined') return;
-    if (!AuthService.isAuthenticated()) {
-      window.location.replace('login.html');
-    }
+    if (typeof AuthService === 'undefined') return Promise.resolve(false);
+    return AuthService.requireAuth();
   }
 
   /* Call on auth pages — redirects to dashboard if already logged in */
   function requireGuest() {
-    if (typeof AuthService === 'undefined') return;
-    if (AuthService.isAuthenticated()) {
-      window.location.replace('dashboard.html');
-    }
+    if (typeof AuthService === 'undefined') return Promise.resolve(false);
+    return AuthService.requireGuest();
   }
 
   return { navigate, requireAuth, requireGuest };

@@ -527,6 +527,8 @@ try {
   </a>
 </nav>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/supabase-config.js"></script>
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/worldmap.js"></script>
@@ -598,13 +600,18 @@ async function refreshAll() {
 }
 
 /* Boot — SidebarUI (utils.js) wires collapse, palette select, user pill,
-   query log, and the mobile bottom nav */
-Theme.init();
-Router.requireAuth();
-SidebarUI.init('dashboard');
-initSuggestions();
-Kanban.init();
-WorldMap.mount();
+   query log, and the mobile bottom nav. Auth guard is async now (Supabase
+   session check + settings sync), so everything waits on it. */
+(async () => {
+  Theme.init();
+  if (!await Router.requireAuth()) return; // redirecting to login
+  Theme.init(); // re-apply — cloud settings may carry a different palette
+  SidebarUI.init('dashboard');
+  initSuggestions();
+  await ArticleService.load(); // dossier column reads the article cache
+  Kanban.init();
+  WorldMap.mount();
+})();
 </script>
 </body>
 </html>

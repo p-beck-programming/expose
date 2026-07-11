@@ -235,6 +235,8 @@ try {
   </a>
 </nav>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/supabase-config.js"></script>
 <script src="js/auth.service.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/topic.service.js"></script>
@@ -332,10 +334,14 @@ const Library = (() => {
 })();
 
 /* Boot */
-Theme.init();
-Router.requireAuth();
-SidebarUI.init('library');
-Library.render();
+(async () => {
+  Theme.init();
+  if (!await Router.requireAuth()) return; // redirecting to login
+  Theme.init(); // re-apply — cloud settings may carry a different palette
+  SidebarUI.init('library');
+  await ArticleService.load();
+  Library.render();
+})();
 document.addEventListener('dossier:changed', () => Library.render());
 </script>
 </body>
