@@ -17,8 +17,8 @@
      <script src="js/auth.service.js"></script>
    ═══════════════════════════════════════════════ */
 
-const SUPABASE_URL      = 'https://YOUR-PROJECT-REF.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR-ANON-PUBLIC-KEY';
+const SUPABASE_URL      = 'https://kvupdabxblmlkzzkfxew.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2dXBkYWJ4YmxtbGt6emtmeGV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NTM5NzEsImV4cCI6MjA5OTQyOTk3MX0._Zwdyd05pslO46RnGXFvtHilgkEmwlGRFymfaVpFt7o';
 
 (() => {
   if (SUPABASE_URL.includes('YOUR-PROJECT-REF')) {
